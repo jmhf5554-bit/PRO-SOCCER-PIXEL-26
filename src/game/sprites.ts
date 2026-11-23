@@ -61,6 +61,237 @@ export function drawKitSwatch(canvas: HTMLCanvasElement, team: TeamSpec, useAway
   }
 }
 
+// Detailed 16x16 / 20x20 pixel-art club crest / national flag renderer
+export function drawClubCrest(canvas: HTMLCanvasElement, team: TeamSpec) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = false;
+
+  const px = (x: number, y: number, pw: number, ph: number, col: string) => {
+    ctx.fillStyle = col;
+    ctx.fillRect(
+      Math.round((x / 16) * w),
+      Math.round((y / 16) * h),
+      Math.max(1, Math.round((pw / 16) * w)),
+      Math.max(1, Math.round((ph / 16) * h))
+    );
+  };
+
+  // National team flag crests
+  if (team.leagueId === 'selecoes') {
+    px(1, 2, 14, 12, '#0b0f17');
+    if (team.id === 'sel_brasil') {
+      px(2, 3, 12, 10, '#16a34a');
+      px(4, 6, 8, 4, '#facc15');
+      px(6, 5, 4, 6, '#facc15');
+      px(6, 6, 4, 4, '#1d4ed8');
+      px(6, 7, 4, 1, '#f8fafc');
+    } else if (team.id === 'sel_argentina') {
+      px(2, 3, 12, 3, '#38bdf8');
+      px(2, 6, 12, 4, '#f8fafc');
+      px(2, 10, 12, 3, '#38bdf8');
+      px(7, 7, 2, 2, '#facc15');
+    } else if (team.id === 'sel_franca') {
+      px(2, 3, 4, 10, '#1d4ed8');
+      px(6, 3, 4, 10, '#f8fafc');
+      px(10, 3, 4, 10, '#dc2626');
+    } else if (team.id === 'sel_espanha') {
+      px(2, 3, 12, 3, '#dc2626');
+      px(2, 6, 12, 4, '#facc15');
+      px(2, 10, 12, 3, '#dc2626');
+      px(4, 7, 2, 2, '#991b1b');
+    } else if (team.id === 'sel_inglaterra') {
+      px(2, 3, 12, 10, '#f8fafc');
+      px(7, 3, 2, 10, '#dc2626');
+      px(2, 7, 12, 2, '#dc2626');
+    } else if (team.id === 'sel_alemanha') {
+      px(2, 3, 12, 3, '#111827');
+      px(2, 6, 12, 4, '#dc2626');
+      px(2, 10, 12, 3, '#facc15');
+    } else if (team.id === 'sel_portugal') {
+      px(2, 3, 5, 10, '#15803d');
+      px(7, 3, 7, 10, '#b91c1c');
+      px(6, 6, 2, 4, '#facc15');
+    } else {
+      px(2, 3, 12, 5, '#facc15');
+      px(2, 8, 12, 3, '#1e3a8a');
+      px(2, 11, 12, 2, '#dc2626');
+    }
+    return;
+  }
+
+  // Pixel Shield silhouette outline (dark border + inner rim)
+  px(2, 1, 12, 9, '#0b0f17');
+  px(3, 10, 10, 3, '#0b0f17');
+  px(5, 13, 6, 2, '#0b0f17');
+  px(7, 15, 2, 1, '#0b0f17');
+
+  const k = team.kit;
+  const c1 = team.crest?.primary || k.c1;
+  const c2 = team.crest?.secondary || k.c2;
+  const c3 = team.crest?.accent || k.c3 || '#f8fafc';
+
+  // Shield interior fill
+  const fillShield = (col: string) => {
+    px(3, 2, 10, 8, col);
+    px(4, 10, 8, 2, col);
+    px(6, 12, 4, 2, col);
+  };
+
+  if (team.id === 'flamengo') {
+    fillShield('#d91e2a');
+    px(3, 4, 10, 2, '#141414');
+    px(3, 8, 10, 2, '#141414');
+    px(4, 11, 8, 1, '#141414');
+    // Top-left CRF corner box
+    px(3, 2, 5, 5, '#141414');
+    px(4, 3, 3, 3, '#f8fafc');
+    px(5, 4, 1, 1, '#d91e2a');
+    // Gold star above
+    px(7, 0, 2, 1, '#facc15');
+  } else if (team.id === 'palmeiras') {
+    fillShield('#f8fafc');
+    px(4, 3, 8, 7, '#0e6b38');
+    px(5, 10, 6, 2, '#0e6b38');
+    // Inner gold 'P' monogram + white circle
+    px(6, 4, 4, 5, '#f8fafc');
+    px(7, 5, 2, 2, '#0e6b38');
+    px(7, 7, 1, 2, '#0e6b38');
+    px(7, 1, 2, 1, '#dc2626'); // Estrela vermelha
+  } else if (team.id === 'botafogo') {
+    fillShield('#141414');
+    px(5, 2, 2, 10, '#f8fafc');
+    px(9, 2, 2, 10, '#f8fafc');
+    // Estrela solitária branca no topo
+    px(7, 4, 2, 2, '#f8fafc');
+    px(6, 5, 4, 1, '#f8fafc');
+    px(7, 3, 2, 4, '#f8fafc');
+  } else if (team.id === 'saopaulo') {
+    fillShield('#f8fafc');
+    px(3, 2, 10, 4, '#111827');
+    px(4, 3, 8, 2, '#f8fafc');
+    px(4, 7, 4, 4, '#dc2626');
+    px(8, 7, 4, 4, '#111827');
+    px(6, 12, 4, 2, '#dc2626');
+    // Stars
+    px(5, 0, 1, 1, '#facc15');
+    px(7, 0, 2, 1, '#dc2626');
+    px(10, 0, 1, 1, '#facc15');
+  } else if (team.id === 'fluminense') {
+    fillShield('#7c1d34');
+    px(3, 6, 10, 2, '#f8fafc');
+    px(4, 8, 8, 4, '#006847');
+    px(6, 12, 4, 2, '#006847');
+    px(6, 4, 4, 4, '#f8fafc');
+    px(7, 5, 2, 2, '#7c1d34');
+  } else if (team.id === 'cruzeiro') {
+    fillShield('#f8fafc');
+    px(4, 3, 8, 8, '#1d4ed8');
+    px(6, 11, 4, 2, '#1d4ed8');
+    // 5 stars (Cruzeiro do Sul)
+    px(7, 4, 1, 1, '#f8fafc');
+    px(5, 6, 1, 1, '#f8fafc');
+    px(9, 6, 1, 1, '#f8fafc');
+    px(7, 8, 1, 1, '#f8fafc');
+    px(8, 7, 1, 1, '#f8fafc');
+    px(7, 0, 2, 1, '#facc15');
+  } else if (team.id === 'atleticomg') {
+    fillShield('#111111');
+    px(5, 6, 2, 7, '#f8fafc');
+    px(9, 6, 2, 7, '#f8fafc');
+    px(3, 2, 10, 4, '#111111');
+    px(5, 3, 6, 2, '#f8fafc');
+    px(6, 4, 4, 1, '#111111');
+    px(7, 0, 2, 1, '#facc15');
+  } else if (team.id === 'paysandu') {
+    fillShield('#0284c7');
+    px(5, 2, 2, 10, '#f8fafc');
+    px(9, 2, 2, 10, '#f8fafc');
+    px(4, 5, 8, 3, '#0369a1');
+    px(6, 6, 4, 1, '#f8fafc');
+    px(6, 0, 1, 1, '#facc15');
+    px(9, 0, 1, 1, '#facc15');
+  } else if (team.crest?.pattern === 'shield_hoops' || k.pattern === 'hoops') {
+    fillShield(c1);
+    px(3, 4, 10, 2, c2);
+    px(3, 8, 10, 2, c2);
+  } else if (team.crest?.pattern === 'shield_stripes' || k.pattern === 'stripes_v') {
+    fillShield(c1);
+    px(5, 2, 2, 10, c2);
+    px(9, 2, 2, 10, c2);
+  } else if (k.pattern === 'sash') {
+    fillShield(c1);
+    px(4, 3, 2, 2, c2);
+    px(6, 5, 2, 2, c2);
+    px(8, 7, 2, 2, c2);
+    px(10, 9, 2, 2, c2);
+  } else if (k.pattern === 'chest_band') {
+    fillShield(c1);
+    px(3, 5, 10, 3, c2);
+    px(3, 7, 10, 1, c3);
+  } else {
+    fillShield(c1);
+    px(5, 4, 6, 5, c2);
+    px(7, 5, 2, 3, c3);
+  }
+}
+
+// Realistic classic round pixel-art pentagon soccer ball rotating proportionally to spin
+export function drawSoccerBallPixel(
+  ctx: CanvasRenderingContext2D,
+  bx: number,
+  by: number,
+  radius: number,
+  spin: number
+) {
+  const r = Math.max(3, Math.round(radius));
+  const cx = Math.round(bx);
+  const cy = Math.round(by);
+
+  // Dark outline circle
+  ctx.fillStyle = '#0b0f17';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 1, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Crisp white leather base
+  ctx.fillStyle = '#f8fafc';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Subtle lower-right shading
+  ctx.fillStyle = '#cbd5e1';
+  ctx.beginPath();
+  ctx.arc(cx + 1, cy + 1, Math.max(1, r - 1), 0.15, Math.PI * 0.95);
+  ctx.fill();
+
+  // Rotating pentagon seam patches
+  ctx.fillStyle = '#0f172a';
+  const px1 = Math.round(cx + Math.cos(spin) * (r * 0.45));
+  const py1 = Math.round(cy + Math.sin(spin) * (r * 0.42));
+  ctx.fillRect(px1 - 1, py1 - 1, 2, 2);
+
+  const px2 = Math.round(cx + Math.cos(spin + 2.2) * (r * 0.62));
+  const py2 = Math.round(cy + Math.sin(spin + 2.2) * (r * 0.58));
+  if (Math.hypot(px2 - cx, py2 - cy) <= r) {
+    ctx.fillRect(px2, py2, 1, 2);
+  }
+
+  const px3 = Math.round(cx + Math.cos(spin + 4.3) * (r * 0.62));
+  const py3 = Math.round(cy + Math.sin(spin + 4.3) * (r * 0.58));
+  if (Math.hypot(px3 - cx, py3 - cy) <= r) {
+    ctx.fillRect(px3, py3, 2, 1);
+  }
+
+  // Highlight pixel
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(cx - Math.max(1, Math.floor(r * 0.45)), cy - Math.max(1, Math.floor(r * 0.45)), 1, 1);
+}
+
 // Draw mini pixel-art jersey icon for the broadcast scoreboard (like reference screenshot)
 export function drawMiniJerseyIcon(canvas: HTMLCanvasElement, team: TeamSpec, useAway: boolean) {
   const ctx = canvas.getContext('2d');

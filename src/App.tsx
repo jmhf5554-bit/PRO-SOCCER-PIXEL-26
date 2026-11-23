@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { AudioFX } from './audio/sound';
-import { KitSwatch, PlayerSpritePreview } from './components/PixelPreview';
+import { ClubCrest, KitSwatch, PlayerSpritePreview } from './components/PixelPreview';
 import { DIFFICULTIES, LEAGUES, TEAMS, isKitClash } from './data/leagues';
 import { MatchCanvas } from './game/MatchCanvas';
 import { CareerView } from './modes/CareerView';
 import { TournamentView } from './modes/TournamentView';
-import { DifficultyId, MatchConfig, MatchResult } from './types';
+import { DifficultyId, FormationId, MatchConfig, MatchResult, WeatherId } from './types';
 
 type Screen = 'HOME' | 'QUICK' | 'CAREER' | 'TOURNAMENT' | 'PLAYING' | 'RESULT';
 
@@ -16,6 +16,8 @@ export default function App() {
   // Quick Match / 2P / Training state
   const [quickMode, setQuickMode] = useState<'quick' | 'two_player' | 'training'>('quick');
   const [difficulty, setDifficulty] = useState<DifficultyId>('amador');
+  const [weather, setWeather] = useState<WeatherId>('sunny');
+  const [formation, setFormation] = useState<FormationId>('4-3-3');
   const [homeLeague, setHomeLeague] = useState('brasileirao');
   const [awayLeague, setAwayLeague] = useState('brasileirao');
   const [homeTeamId, setHomeTeamId] = useState('flamengo');
@@ -155,7 +157,7 @@ export default function App() {
 
             <div className="border-t border-white/10 pt-3 text-xs text-slate-400 flex flex-wrap justify-between gap-2">
               <span>
-                <strong className="text-slate-200">Controles:</strong> WASD correr · Shift trocar jogador · J passar · K chutar / carrinho
+                <strong className="text-slate-200">Controles:</strong> WASD/Setas · Shift Trocar/Sprint · J Passe · H Enfiada · L Cruzamento · K Chute/Carrinho · Espaço Proteger/Corte
               </span>
               <span>P / Esc Pausar · M Som</span>
             </div>
@@ -205,6 +207,51 @@ export default function App() {
                 ))}
               </div>
             )}
+
+            {/* Weather & Initial Formation Selectors */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-slate-900/70 border border-white/10 rounded-lg p-2.5 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold uppercase text-slate-300">Clima</span>
+                <div className="flex gap-1.5">
+                  {(
+                    [
+                      ['sunny', 'Dia Ensolarado'],
+                      ['night', 'Noite Refletores'],
+                      ['rain', 'Chuva Leve']
+                    ] as const
+                  ).map(([wId, wLbl]) => (
+                    <button
+                      key={wId}
+                      type="button"
+                      onClick={() => setWeather(wId)}
+                      className={`px-2.5 py-1.5 rounded border text-[11px] font-bold cursor-pointer ${
+                        weather === wId ? 'bg-yellow-400 text-slate-950 border-yellow-300' : 'bg-slate-950 text-slate-300 border-white/10'
+                      }`}
+                    >
+                      {wLbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/70 border border-white/10 rounded-lg p-2.5 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold uppercase text-slate-300">Esquema</span>
+                <div className="flex gap-1.5">
+                  {(['4-3-3', '4-4-2', '4-2-3-1', '3-5-2'] as FormationId[]).map((fId) => (
+                    <button
+                      key={fId}
+                      type="button"
+                      onClick={() => setFormation(fId)}
+                      className={`px-2.5 py-1.5 rounded border text-[11px] font-bold cursor-pointer ${
+                        formation === fId ? 'bg-emerald-600 text-white border-yellow-400' : 'bg-slate-950 text-slate-300 border-white/10'
+                      }`}
+                    >
+                      {fId}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
 
             {/* Home & Away Team Selectors */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -332,8 +379,8 @@ export default function App() {
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <div className="text-xs text-slate-400">
                 {quickMode === 'two_player'
-                  ? 'P1: WASD + Shift (Trocar) + J (Passe) + K (Chute) · P2: Setas + Ctrl/,(Trocar) + N (Passe) + M/Enter (Chute)'
-                  : 'WASD ou Setas Mover · Shift Trocar · J ou X Passe · K, Z ou Espaço Chute / Carrinho'}
+                  ? 'P1: WASD + Shift (Trocar/Sprint) + J (Passe) + K (Chute) · P2: Setas + Ctrl/,(Trocar) + N (Passe) + M/Enter (Chute)'
+                  : 'WASD/Setas Mover · Shift Trocar/Sprint · J Passe · H Enfiada · L Cruzamento · K Chute/Carrinho · Espaço Proteger/Corte'}
               </div>
               <button
                 type="button"
@@ -345,7 +392,9 @@ export default function App() {
                       awayTeam,
                       homeUseAway: homeKitReserve,
                       awayUseAway: awayKitReserve || autoClash,
-                      difficulty
+                      difficulty,
+                      weather,
+                      formation
                     },
                     'QUICK'
                   )
@@ -387,14 +436,14 @@ export default function App() {
 
             <div className="flex items-center justify-center gap-5 bg-slate-900 rounded-lg p-4 tabular-nums">
               <div className="flex flex-col items-center gap-1 min-w-[90px]">
-                <KitSwatch team={activeMatch.homeTeam} useAway={activeMatch.homeUseAway} className="w-7 h-7" />
+                <ClubCrest team={activeMatch.homeTeam} className="w-8 h-8" />
                 <strong className="text-xs">{activeMatch.homeTeam.name}</strong>
               </div>
               <div className="font-mono text-3xl font-extrabold text-white">
                 {lastResult.homeScore} - {lastResult.awayScore}
               </div>
               <div className="flex flex-col items-center gap-1 min-w-[90px]">
-                <KitSwatch team={activeMatch.awayTeam} useAway={activeMatch.awayUseAway} className="w-7 h-7" />
+                <ClubCrest team={activeMatch.awayTeam} className="w-8 h-8" />
                 <strong className="text-xs">{activeMatch.awayTeam.name}</strong>
               </div>
             </div>

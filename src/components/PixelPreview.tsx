@@ -1,13 +1,17 @@
 import React, { useEffect, useRef } from 'react';
-import { drawKitSwatch, drawPixelPlayerSprite } from '../game/sprites';
+import { drawClubCrest, drawPixelPlayerSprite } from '../game/sprites';
 import { PlayerSpec, TeamSpec } from '../types';
 
-export const KitSwatch: React.FC<{ team: TeamSpec; useAway?: boolean; className?: string }> = ({ team, useAway = false, className = 'w-5 h-5' }) => {
+export const ClubCrest: React.FC<{ team: TeamSpec; className?: string }> = ({ team, className = 'w-5 h-5' }) => {
   const ref = useRef<HTMLCanvasElement | null>(null);
   useEffect(() => {
-    if (ref.current) drawKitSwatch(ref.current, team, useAway);
-  }, [team, useAway]);
-  return <canvas ref={ref} width={16} height={16} className={`rounded-xs border border-white/25 shrink-0 ${className}`} style={{ imageRendering: 'pixelated' }} />;
+    if (ref.current) drawClubCrest(ref.current, team);
+  }, [team]);
+  return <canvas ref={ref} width={16} height={16} className={`shrink-0 ${className}`} style={{ imageRendering: 'pixelated' }} />;
+};
+
+export const KitSwatch: React.FC<{ team: TeamSpec; useAway?: boolean; className?: string }> = ({ team, className = 'w-5 h-5' }) => {
+  return <ClubCrest team={team} className={className} />;
 };
 
 export const PlayerSpritePreview: React.FC<{ player: PlayerSpec; team: TeamSpec; useAway?: boolean; className?: string }> = ({

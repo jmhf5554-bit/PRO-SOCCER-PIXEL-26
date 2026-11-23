@@ -65,6 +65,28 @@ export interface TeamKit {
   awaySocks: string;
 }
 
+export type WeatherId = 'sunny' | 'night' | 'rain';
+export type FormationId = '4-3-3' | '4-4-2' | '4-2-3-1' | '3-5-2';
+export type MentalityId = 'retranca' | 'equilibrado' | 'pressao_alta';
+
+export type CrestPattern =
+  | 'shield_hoops'
+  | 'shield_stripes'
+  | 'shield_star'
+  | 'shield_sash'
+  | 'shield_tricolor'
+  | 'shield_circle'
+  | 'shield_cross'
+  | 'flag_national';
+
+export interface CrestSpec {
+  pattern: CrestPattern;
+  primary: string;
+  secondary: string;
+  accent?: string;
+  stars?: number;
+}
+
 export interface TeamSpec {
   id: string;
   leagueId: string;
@@ -72,7 +94,9 @@ export interface TeamSpec {
   abbr: string;
   ovr: number;
   kit: TeamKit;
+  crest?: CrestSpec;
   players: PlayerSpec[];
+  bench?: PlayerSpec[];
 }
 
 export interface LeagueSpec {
@@ -92,6 +116,9 @@ export interface MatchConfig {
   awayUseAway: boolean;
   difficulty: DifficultyId;
   tactic?: TacticId;
+  formation?: FormationId;
+  mentality?: MentalityId;
+  weather?: WeatherId;
   matchDurationSec?: number;
   lockedPlayerSlot?: number; // for Player Career
   customPlayer?: PlayerSpec;

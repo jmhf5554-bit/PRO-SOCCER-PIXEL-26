@@ -71,93 +71,157 @@ export const LEAGUES: LeagueSpec[] = [
 ];
 
 export const TEAMS: TeamSpec[] = [
-  // ================= BRASILEIRÃO (8 clubes) =================
+  // ================= BRASILEIRÃO (8 clubes - Elencos Atualizados + Banco de Reservas) =================
   {
-    id: 'flamengo', leagueId: 'brasileirao', name: 'Flamengo', abbr: 'FLA', ovr: 83,
+    id: 'flamengo', leagueId: 'brasileirao', name: 'Flamengo', abbr: 'FLA', ovr: 84,
+    crest: { pattern: 'shield_hoops', primary: '#d91e2a', secondary: '#141414', accent: '#f8fafc', stars: 1 },
     kit: { pattern: 'hoops', c1: '#d91e2a', c2: '#141414', shorts: '#141414', socks: '#d91e2a', gk: '#eab308', gk2: '#a16207', awayC1: '#f8fafc', awayC2: '#d91e2a', awayShorts: '#f8fafc', awaySocks: '#f8fafc' },
     players: [
-      { num: 1, name: 'Rossi', role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', boots: '#f97316', ovr: 81 },
-      { num: 3, name: 'Léo Ortiz', role: 'ZAG', skin: 'fair', hair: 'short_parted', hairColor: '#3e2b20', boots: '#f8fafc', ovr: 82 },
-      { num: 8, name: 'Gerson', role: 'MEI', skin: 'brown', hair: 'dreads', hairColor: '#191412', beard: true, boots: '#facc15', ovr: 84 },
-      { num: 14, name: 'Arrascaeta', role: 'MEI', skin: 'fair', hair: 'shaggy', hairColor: '#2d2018', beard: true, boots: '#06b6d4', ovr: 85 },
-      { num: 27, name: 'B. Henrique', role: 'ATA', skin: 'brown', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#ef4444', ovr: 83 }
+      { num: 1, name: 'Rossi', role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', boots: '#f97316', ovr: 82 },
+      { num: 3, name: 'Léo Ortiz', role: 'ZAG', skin: 'fair', hair: 'short_parted', hairColor: '#3e2b20', boots: '#f8fafc', ovr: 83 },
+      { num: 8, name: 'Gerson', role: 'MEI', skin: 'brown', hair: 'dreads', hairColor: '#191412', beard: true, boots: '#facc15', ovr: 85 },
+      { num: 10, name: 'Arrascaeta', role: 'MEI', skin: 'fair', hair: 'shaggy', hairColor: '#2d2018', beard: true, boots: '#06b6d4', ovr: 86 },
+      { num: 9, name: 'Pedro', role: 'ATA', skin: 'olive', hair: 'short_fade', hairColor: '#241a15', beard: true, boots: '#ef4444', ovr: 85 }
+    ],
+    bench: [
+      { num: 27, name: 'B. Henrique', role: 'ATA', skin: 'brown', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#ef4444', ovr: 83 },
+      { num: 18, name: 'De La Cruz', role: 'MEI', skin: 'olive', hair: 'short_fade', hairColor: '#1b1512', boots: '#facc15', ovr: 83 },
+      { num: 4, name: 'Léo Pereira', role: 'ZAG', skin: 'fair', hair: 'platinum_fade', hairColor: '#f5f5f4', beard: true, boots: '#38bdf8', ovr: 81 },
+      { num: 43, name: 'Wesley', role: 'ZAG', skin: 'brown', hair: 'short_fade', hairColor: '#161210', boots: '#22c55e', ovr: 80 },
+      { num: 25, name: 'M. Cunha', role: 'GOL', skin: 'fair', hair: 'short_parted', hairColor: '#3d2b22', boots: '#f8fafc', ovr: 77 }
     ]
   },
   {
-    id: 'palmeiras', leagueId: 'brasileirao', name: 'Palmeiras', abbr: 'PAL', ovr: 83,
+    id: 'palmeiras', leagueId: 'brasileirao', name: 'Palmeiras', abbr: 'PAL', ovr: 84,
+    crest: { pattern: 'shield_circle', primary: '#0e6b38', secondary: '#f8fafc', accent: '#facc15', stars: 1 },
     kit: { pattern: 'solid_trim', c1: '#0e6b38', c2: '#094a26', shorts: '#f8fafc', socks: '#0e6b38', gk: '#0284c7', gk2: '#075985', awayC1: '#f8fafc', awayC2: '#0e6b38', awayShorts: '#0e6b38', awaySocks: '#f8fafc' },
     players: [
       { num: 21, name: 'Weverton', role: 'GOL', skin: 'dark', hair: 'bald', hairColor: '#3c200e', beard: true, boots: '#84cc16', ovr: 82 },
       { num: 15, name: 'G. Gómez', role: 'ZAG', skin: 'olive', hair: 'short_fade', hairColor: '#1f1713', beard: true, boots: '#facc15', ovr: 83 },
       { num: 8, name: 'Richard Ríos', role: 'MEI', skin: 'tan', hair: 'curly_tips', hairColor: '#1b1512', boots: '#ec4899', ovr: 82 },
       { num: 23, name: 'R. Veiga', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3a271c', boots: '#f8fafc', ovr: 84 },
-      { num: 41, name: 'Estêvão', role: 'ATA', skin: 'brown', hair: 'curly_afro', hairColor: '#161210', boots: '#22c55e', ovr: 84 }
+      { num: 41, name: 'Estêvão', role: 'ATA', skin: 'brown', hair: 'curly_afro', hairColor: '#161210', boots: '#22c55e', ovr: 85 }
+    ],
+    bench: [
+      { num: 9, name: 'Vitor Roque', role: 'ATA', skin: 'tan', hair: 'short_fade', hairColor: '#1a1512', boots: '#f97316', ovr: 83 },
+      { num: 10, name: 'Paulinho', role: 'ATA', skin: 'brown', hair: 'curly_afro', hairColor: '#161210', boots: '#ef4444', ovr: 82 },
+      { num: 18, name: 'Maurício', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3a271c', boots: '#38bdf8', ovr: 80 },
+      { num: 26, name: 'Murilo', role: 'ZAG', skin: 'fair', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#facc15', ovr: 81 },
+      { num: 14, name: 'M. Lomba', role: 'GOL', skin: 'fair', hair: 'short_parted', hairColor: '#4c3425', boots: '#f8fafc', ovr: 77 }
     ]
   },
   {
     id: 'botafogo', leagueId: 'brasileirao', name: 'Botafogo', abbr: 'BOT', ovr: 82,
+    crest: { pattern: 'shield_star', primary: '#141414', secondary: '#f8fafc', accent: '#f8fafc', stars: 1 },
     kit: { pattern: 'stripes_v', c1: '#141414', c2: '#f8fafc', shorts: '#141414', socks: '#141414', gk: '#15803d', gk2: '#14532d', awayC1: '#1e293b', awayC2: '#334155', awayShorts: '#f8fafc', awaySocks: '#1e293b' },
     players: [
-      { num: 12, name: 'John', role: 'GOL', skin: 'tan', hair: 'short_fade', hairColor: '#1a1512', boots: '#f8fafc', ovr: 81 },
+      { num: 12, name: 'John', role: 'GOL', skin: 'tan', hair: 'short_fade', hairColor: '#1a1512', boots: '#f8fafc', ovr: 82 },
       { num: 15, name: 'Bastos', role: 'ZAG', skin: 'dark', hair: 'short_fade', hairColor: '#141110', boots: '#facc15', ovr: 81 },
-      { num: 10, name: 'Savarino', role: 'MEI', skin: 'tan', hair: 'curly_afro', hairColor: '#1e1714', boots: '#06b6d4', ovr: 82 },
-      { num: 7, name: 'Luiz Henrique', role: 'MEI', skin: 'brown', hair: 'platinum_curly', hairColor: '#fef3c7', boots: '#f43f5e', ovr: 83 },
-      { num: 99, name: 'Igor Jesus', role: 'ATA', skin: 'brown', hair: 'dreads', hairColor: '#181412', beard: true, boots: '#facc15', ovr: 82 }
+      { num: 10, name: 'Savarino', role: 'MEI', skin: 'tan', hair: 'curly_afro', hairColor: '#1e1714', boots: '#06b6d4', ovr: 83 },
+      { num: 17, name: 'M. Freitas', role: 'MEI', skin: 'brown', hair: 'short_fade', hairColor: '#191412', beard: true, boots: '#22c55e', ovr: 81 },
+      { num: 99, name: 'Igor Jesus', role: 'ATA', skin: 'brown', hair: 'dreads', hairColor: '#181412', beard: true, boots: '#facc15', ovr: 83 }
+    ],
+    bench: [
+      { num: 11, name: 'M. Martins', role: 'ATA', skin: 'brown', hair: 'short_fade', hairColor: '#161210', boots: '#f43f5e', ovr: 79 },
+      { num: 26, name: 'Gregore', role: 'MEI', skin: 'olive', hair: 'bald', hairColor: '#3c200e', beard: true, boots: '#f8fafc', ovr: 80 },
+      { num: 20, name: 'Barboza', role: 'ZAG', skin: 'fair', hair: 'shaggy', hairColor: '#2c1f19', beard: true, boots: '#111827', ovr: 80 },
+      { num: 7, name: 'Artur', role: 'ATA', skin: 'tan', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#facc15', ovr: 80 },
+      { num: 24, name: 'Léo Linck', role: 'GOL', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#38bdf8', ovr: 76 }
     ]
   },
   {
-    id: 'saopaulo', leagueId: 'brasileirao', name: 'São Paulo', abbr: 'SAO', ovr: 80,
+    id: 'saopaulo', leagueId: 'brasileirao', name: 'São Paulo', abbr: 'SAO', ovr: 81,
+    crest: { pattern: 'shield_tricolor', primary: '#dc2626', secondary: '#111827', accent: '#f8fafc', stars: 3 },
     kit: { pattern: 'chest_band', c1: '#f8fafc', c2: '#dc2626', c3: '#111827', shorts: '#f8fafc', socks: '#f8fafc', gk: '#0e7490', gk2: '#164e63', awayC1: '#dc2626', awayC2: '#111827', awayShorts: '#111827', awaySocks: '#111827' },
     players: [
-      { num: 23, name: 'Rafael', role: 'GOL', skin: 'fair', hair: 'short_parted', hairColor: '#3d2b22', boots: '#f97316', ovr: 79 },
-      { num: 5, name: 'Arboleda', role: 'ZAG', skin: 'dark', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#eab308', ovr: 80 },
-      { num: 7, name: 'Lucas Moura', role: 'MEI', skin: 'brown', hair: 'bald', hairColor: '#6a3c1c', beard: true, boots: '#ef4444', ovr: 82 },
-      { num: 10, name: 'Luciano', role: 'MEI', skin: 'tan', hair: 'short_fade', hairColor: '#211915', beard: true, boots: '#f8fafc', ovr: 80 },
+      { num: 23, name: 'Rafael', role: 'GOL', skin: 'fair', hair: 'short_parted', hairColor: '#3d2b22', boots: '#f97316', ovr: 80 },
+      { num: 5, name: 'Arboleda', role: 'ZAG', skin: 'dark', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#eab308', ovr: 81 },
+      { num: 8, name: 'Oscar', role: 'MEI', skin: 'olive', hair: 'short_parted', hairColor: '#261b16', boots: '#38bdf8', ovr: 83 },
+      { num: 7, name: 'Lucas Moura', role: 'MEI', skin: 'brown', hair: 'bald', hairColor: '#6a3c1c', beard: true, boots: '#ef4444', ovr: 83 },
       { num: 9, name: 'Calleri', role: 'ATA', skin: 'fair', hair: 'shaggy', hairColor: '#563a28', beard: true, boots: '#111827', headband: '#dc2626', ovr: 81 }
+    ],
+    bench: [
+      { num: 10, name: 'Luciano', role: 'ATA', skin: 'tan', hair: 'short_fade', hairColor: '#211915', beard: true, boots: '#f8fafc', ovr: 80 },
+      { num: 11, name: 'Ferreira', role: 'ATA', skin: 'olive', hair: 'short_fade', hairColor: '#261b16', boots: '#22c55e', ovr: 79 },
+      { num: 29, name: 'Pablo Maia', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#facc15', ovr: 79 },
+      { num: 4, name: 'Alan Franco', role: 'ZAG', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', beard: true, boots: '#f8fafc', ovr: 79 },
+      { num: 93, name: 'Jandrei', role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#3b281e', beard: true, boots: '#ef4444', ovr: 75 }
     ]
   },
   {
-    id: 'fluminense', leagueId: 'brasileirao', name: 'Fluminense', abbr: 'FLU', ovr: 79,
+    id: 'fluminense', leagueId: 'brasileirao', name: 'Fluminense', abbr: 'FLU', ovr: 80,
+    crest: { pattern: 'shield_tricolor', primary: '#7c1d34', secondary: '#006847', accent: '#f8fafc', stars: 1 },
     kit: { pattern: 'tricolor_v', c1: '#7c1d34', c2: '#006847', c3: '#f8fafc', shorts: '#f8fafc', socks: '#7c1d34', gk: '#334155', gk2: '#1e293b', awayC1: '#f8fafc', awayC2: '#7c1d34', awayShorts: '#7c1d34', awaySocks: '#f8fafc' },
     players: [
-      { num: 1, name: 'Fábio', role: 'GOL', skin: 'olive', hair: 'silver_short', hairColor: '#e2e8f0', beard: true, boots: '#0f172a', ovr: 80 },
-      { num: 3, name: 'Thiago Silva', role: 'ZAG', skin: 'brown', hair: 'silver_fade', hairColor: '#cbd5e1', beard: true, boots: '#facc15', ovr: 82 },
-      { num: 10, name: 'Ganso', role: 'MEI', skin: 'olive', hair: 'short_parted', hairColor: '#251c18', beard: true, boots: '#38bdf8', ovr: 79 },
-      { num: 21, name: 'Jhon Arias', role: 'MEI', skin: 'brown', hair: 'short_fade', hairColor: '#171412', boots: '#f97316', ovr: 81 },
-      { num: 14, name: 'Germán Cano', role: 'ATA', skin: 'fair', hair: 'shaggy', hairColor: '#4c3425', boots: '#ef4444', ovr: 79 }
+      { num: 1, name: 'Fábio', role: 'GOL', skin: 'olive', hair: 'silver_short', hairColor: '#e2e8f0', beard: true, boots: '#0f172a', ovr: 81 },
+      { num: 3, name: 'Thiago Silva', role: 'ZAG', skin: 'brown', hair: 'silver_fade', hairColor: '#cbd5e1', beard: true, boots: '#facc15', ovr: 83 },
+      { num: 10, name: 'Ganso', role: 'MEI', skin: 'olive', hair: 'short_parted', hairColor: '#251c18', beard: true, boots: '#38bdf8', ovr: 80 },
+      { num: 21, name: 'Jhon Arias', role: 'MEI', skin: 'brown', hair: 'short_fade', hairColor: '#171412', boots: '#f97316', ovr: 82 },
+      { num: 14, name: 'Germán Cano', role: 'ATA', skin: 'fair', hair: 'shaggy', hairColor: '#4c3425', boots: '#ef4444', ovr: 80 }
+    ],
+    bench: [
+      { num: 9, name: 'Everaldo', role: 'ATA', skin: 'tan', hair: 'short_fade', hairColor: '#1f1713', boots: '#22c55e', ovr: 78 },
+      { num: 11, name: 'Keno', role: 'ATA', skin: 'brown', hair: 'short_fade', hairColor: '#161210', boots: '#facc15', ovr: 78 },
+      { num: 8, name: 'Martinelli', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#38bdf8', ovr: 78 },
+      { num: 2, name: 'S. Xavier', role: 'ZAG', skin: 'tan', hair: 'short_fade', hairColor: '#1f1713', boots: '#f8fafc', ovr: 77 },
+      { num: 98, name: 'Vitor Eudes', role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', boots: '#f97316', ovr: 75 }
     ]
   },
   {
-    id: 'cruzeiro', leagueId: 'brasileirao', name: 'Cruzeiro', abbr: 'CRU', ovr: 79,
+    id: 'cruzeiro', leagueId: 'brasileirao', name: 'Cruzeiro', abbr: 'CRU', ovr: 80,
+    crest: { pattern: 'shield_circle', primary: '#1d4ed8', secondary: '#f8fafc', accent: '#facc15', stars: 5 },
     kit: { pattern: 'solid_trim', c1: '#1d4ed8', c2: '#1e3a8a', shorts: '#f8fafc', socks: '#1d4ed8', gk: '#eab308', gk2: '#ca8a04', awayC1: '#f8fafc', awayC2: '#1d4ed8', awayShorts: '#1d4ed8', awaySocks: '#f8fafc' },
     players: [
       { num: 1, name: 'Cássio', role: 'GOL', skin: 'fair', hair: 'shaggy', hairColor: '#2c1f19', beard: true, boots: '#f8fafc', ovr: 80 },
-      { num: 4, name: 'João Marcelo', role: 'ZAG', skin: 'brown', hair: 'short_fade', hairColor: '#191412', boots: '#38bdf8', ovr: 78 },
-      { num: 10, name: 'M. Pereira', role: 'MEI', skin: 'olive', hair: 'short_parted', hairColor: '#2d2018', beard: true, boots: '#facc15', ovr: 82 },
+      { num: 15, name: 'F. Bruno', role: 'ZAG', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#38bdf8', ovr: 81 },
+      { num: 10, name: 'M. Pereira', role: 'MEI', skin: 'olive', hair: 'short_parted', hairColor: '#2d2018', beard: true, boots: '#facc15', ovr: 83 },
+      { num: 8, name: 'M. Henrique', role: 'MEI', skin: 'tan', hair: 'curly_afro', hairColor: '#181412', boots: '#f97316', ovr: 80 },
+      { num: 9, name: 'Gabigol', role: 'ATA', skin: 'olive', hair: 'platinum_fade', hairColor: '#f5f5f4', beard: true, boots: '#22c55e', ovr: 81 }
+    ],
+    bench: [
+      { num: 19, name: 'Kaio Jorge', role: 'ATA', skin: 'tan', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#22c55e', ovr: 79 },
+      { num: 7, name: 'Dudu', role: 'ATA', skin: 'tan', hair: 'short_fade', hairColor: '#1f1713', boots: '#facc15', ovr: 80 },
       { num: 29, name: 'L. Romero', role: 'MEI', skin: 'olive', hair: 'short_fade', hairColor: '#211915', boots: '#f97316', ovr: 78 },
-      { num: 9, name: 'Kaio Jorge', role: 'ATA', skin: 'tan', hair: 'platinum_fade', hairColor: '#f5f5f4', boots: '#22c55e', ovr: 79 }
+      { num: 43, name: 'João Marcelo', role: 'ZAG', skin: 'brown', hair: 'short_fade', hairColor: '#191412', boots: '#38bdf8', ovr: 78 },
+      { num: 81, name: 'Léo Aragão', role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', boots: '#f8fafc', ovr: 75 }
     ]
   },
   {
-    id: 'atleticomg', leagueId: 'brasileirao', name: 'Atlético-MG', abbr: 'CAM', ovr: 80,
+    id: 'atleticomg', leagueId: 'brasileirao', name: 'Atlético-MG', abbr: 'CAM', ovr: 81,
+    crest: { pattern: 'shield_stripes', primary: '#111111', secondary: '#f8fafc', accent: '#facc15', stars: 1 },
     kit: { pattern: 'stripes_v', c1: '#111111', c2: '#f8fafc', shorts: '#111111', socks: '#111111', gk: '#0ea5e9', gk2: '#0369a1', awayC1: '#f8fafc', awayC2: '#111111', awayShorts: '#f8fafc', awaySocks: '#f8fafc' },
     players: [
       { num: 22, name: 'Everson', role: 'GOL', skin: 'olive', hair: 'short_fade', hairColor: '#261b16', boots: '#facc15', ovr: 80 },
-      { num: 2, name: 'Lyanco', role: 'ZAG', skin: 'fair', hair: 'short_fade', hairColor: '#1c1714', beard: true, boots: '#f8fafc', ovr: 79 },
-      { num: 6, name: 'Gustavo Scarpa', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#22c55e', ovr: 81 },
-      { num: 10, name: 'Paulinho', role: 'MEI', skin: 'brown', hair: 'curly_afro', hairColor: '#161210', boots: '#ef4444', ovr: 82 },
+      { num: 8, name: 'J. Alonso', role: 'ZAG', skin: 'olive', hair: 'short_fade', hairColor: '#1c1714', beard: true, boots: '#f8fafc', ovr: 80 },
+      { num: 13, name: 'G. Arana', role: 'MEI', skin: 'brown', hair: 'short_fade', hairColor: '#191412', boots: '#38bdf8', ovr: 82 },
+      { num: 10, name: 'G. Scarpa', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#22c55e', ovr: 82 },
       { num: 7, name: 'Hulk', role: 'ATA', skin: 'tan', hair: 'short_fade', hairColor: '#1f1713', beard: true, boots: '#f97316', ovr: 84 }
+    ],
+    bench: [
+      { num: 33, name: 'Rony', role: 'ATA', skin: 'brown', hair: 'short_fade', hairColor: '#161210', boots: '#ef4444', ovr: 79 },
+      { num: 28, name: 'Cuello', role: 'ATA', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#facc15', ovr: 78 },
+      { num: 23, name: 'Alan Franco', role: 'MEI', skin: 'dark', hair: 'short_fade', hairColor: '#141110', boots: '#22c55e', ovr: 79 },
+      { num: 4, name: 'Lyanco', role: 'ZAG', skin: 'fair', hair: 'short_fade', hairColor: '#1c1714', beard: true, boots: '#f8fafc', ovr: 79 },
+      { num: 31, name: 'M. Mendes', role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', boots: '#0ea5e9', ovr: 76 }
     ]
   },
   {
-    id: 'paysandu', leagueId: 'brasileirao', name: 'Paysandu', abbr: 'PAY', ovr: 74,
+    id: 'paysandu', leagueId: 'brasileirao', name: 'Paysandu', abbr: 'PAY', ovr: 75,
+    crest: { pattern: 'shield_stripes', primary: '#0284c7', secondary: '#f8fafc', accent: '#facc15', stars: 2 },
     kit: { pattern: 'stripes_v', c1: '#0284c7', c2: '#f8fafc', shorts: '#f8fafc', socks: '#0284c7', gk: '#ea580c', gk2: '#9a3412', awayC1: '#0c4a6e', awayC2: '#0284c7', awayShorts: '#0c4a6e', awaySocks: '#f8fafc' },
     players: [
-      { num: 1, name: 'Matheus N.', role: 'GOL', skin: 'tan', hair: 'short_parted', hairColor: '#2c2019', boots: '#facc15', ovr: 74 },
-      { num: 4, name: 'Wanderson', role: 'ZAG', skin: 'brown', hair: 'mohawk', hairColor: '#181412', boots: '#38bdf8', ovr: 73 },
-      { num: 5, name: 'João Vieira', role: 'MEI', skin: 'olive', hair: 'short_fade', hairColor: '#261b16', beard: true, boots: '#f8fafc', ovr: 74 },
-      { num: 11, name: 'Esli García', role: 'MEI', skin: 'tan', hair: 'platinum_fade', hairColor: '#fef08a', boots: '#84cc16', ovr: 75 },
-      { num: 9, name: 'Nicolas', role: 'ATA', skin: 'fair', hair: 'shaggy', hairColor: '#8d6539', beard: true, boots: '#0ea5e9', ovr: 76 }
+      { num: 1, name: 'Matheus N.', role: 'GOL', skin: 'tan', hair: 'short_parted', hairColor: '#2c2019', boots: '#facc15', ovr: 75 },
+      { num: 4, name: 'Quintana', role: 'ZAG', skin: 'olive', hair: 'short_fade', hairColor: '#1f1713', boots: '#38bdf8', ovr: 74 },
+      { num: 5, name: 'Matheus V.', role: 'MEI', skin: 'olive', hair: 'short_fade', hairColor: '#261b16', beard: true, boots: '#f8fafc', ovr: 75 },
+      { num: 10, name: 'Giovanni', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#84cc16', ovr: 75 },
+      { num: 9, name: 'Nicolas', role: 'ATA', skin: 'fair', hair: 'shaggy', hairColor: '#8d6539', beard: true, boots: '#0ea5e9', ovr: 77 }
+    ],
+    bench: [
+      { num: 11, name: 'Rossi P.', role: 'ATA', skin: 'olive', hair: 'short_fade', hairColor: '#261b16', boots: '#facc15', ovr: 74 },
+      { num: 7, name: 'Borasi', role: 'ATA', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#22c55e', ovr: 74 },
+      { num: 8, name: 'Leandro V.', role: 'MEI', skin: 'tan', hair: 'short_fade', hairColor: '#1f1713', boots: '#38bdf8', ovr: 73 },
+      { num: 3, name: 'Luan Freitas', role: 'ZAG', skin: 'brown', hair: 'short_fade', hairColor: '#181412', boots: '#f8fafc', ovr: 73 },
+      { num: 12, name: 'Alisson', role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', boots: '#ea580c', ovr: 72 }
     ]
   },
 
@@ -534,4 +598,16 @@ export function isKitClash(a: TeamSpec, b: TeamSpec): boolean {
   const whites = ['realmadrid', 'saopaulo', 'leipzig', 'river', 'sel_inglaterra', 'sel_alemanha'];
   if (whites.includes(a.id) && whites.includes(b.id)) return true;
   return false;
+}
+
+export function getTeamBench(team: TeamSpec): TeamSpec['players'] {
+  if (team.bench && team.bench.length >= 5) return team.bench;
+  const baseOvr = Math.max(70, team.ovr - 4);
+  return [
+    { num: 19, name: `${team.abbr} Atacante`, role: 'ATA', skin: 'olive', hair: 'short_fade', hairColor: '#261b16', boots: '#f97316', ovr: baseOvr + 1 },
+    { num: 18, name: `${team.abbr} Ponta`, role: 'ATA', skin: 'brown', hair: 'curly_afro', hairColor: '#181412', boots: '#22c55e', ovr: baseOvr },
+    { num: 16, name: `${team.abbr} Armador`, role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', boots: '#38bdf8', ovr: baseOvr },
+    { num: 14, name: `${team.abbr} Zagueiro`, role: 'ZAG', skin: 'tan', hair: 'short_fade', hairColor: '#1f1713', boots: '#facc15', ovr: baseOvr - 1 },
+    { num: 12, name: `${team.abbr} Reserva`, role: 'GOL', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', boots: '#f8fafc', ovr: baseOvr - 2 }
+  ];
 }
