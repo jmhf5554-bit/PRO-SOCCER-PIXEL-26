@@ -1,0 +1,6 @@
+{
+  "name": "Brasileirão Sidekicks 16-Bit",
+  "description": "Jogo de futebol arcade 5v5 em Pixel Art 16-bit estilo Super Sidekicks com times brasileiros em arquivo HTML único.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

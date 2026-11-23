@@ -1,0 +1,112 @@
+export type DifficultyId = 'iniciante' | 'amador' | 'profissional' | 'lenda';
+
+export interface DifficultyConfig {
+  id: DifficultyId;
+  label: string;
+  desc: string;
+  aiSpeedMult: number;
+  pressDist: number;
+  passRate: number;
+  shotFreq: number;
+  shotAccuracy: number;
+  gkSpeedMult: number;
+  gkSaveBonus: number;
+  tackleRate: number;
+  punishFactor: number;
+}
+
+export type SkinToneId = 'fair' | 'olive' | 'tan' | 'brown' | 'dark';
+export type HairStyleId =
+  | 'platinum_fade'
+  | 'platinum_curly'
+  | 'silver_short'
+  | 'silver_fade'
+  | 'dreads'
+  | 'curly_afro'
+  | 'curly_tips'
+  | 'mohawk'
+  | 'shaggy'
+  | 'bald'
+  | 'short_parted'
+  | 'short_fade';
+
+export type PlayerRole = 'GOL' | 'ZAG' | 'MEI' | 'ATA';
+export type KitPattern = 'hoops' | 'solid_trim' | 'tricolor_v' | 'chest_band' | 'stripes_v' | 'sash';
+
+export interface PlayerSpec {
+  num: number;
+  name: string;
+  role: PlayerRole;
+  skin: SkinToneId;
+  hair: HairStyleId;
+  hairColor: string;
+  beard?: boolean;
+  headband?: string;
+  boots: string;
+  ovr: number;
+  pace?: number;
+  shooting?: number;
+  passing?: number;
+  dribbling?: number;
+}
+
+export interface TeamKit {
+  pattern: KitPattern;
+  c1: string;
+  c2: string;
+  c3?: string;
+  shorts: string;
+  socks: string;
+  gk: string;
+  gk2: string;
+  awayC1: string;
+  awayC2: string;
+  awayShorts: string;
+  awaySocks: string;
+}
+
+export interface TeamSpec {
+  id: string;
+  leagueId: string;
+  name: string;
+  abbr: string;
+  ovr: number;
+  kit: TeamKit;
+  players: PlayerSpec[];
+}
+
+export interface LeagueSpec {
+  id: string;
+  name: string;
+  isNational?: boolean;
+}
+
+export type GameMode = 'quick' | 'two_player' | 'training' | 'tournament' | 'career_manager' | 'career_player';
+export type TacticId = 'equilibrado' | 'ofensivo' | 'retranca';
+
+export interface MatchConfig {
+  mode: GameMode;
+  homeTeam: TeamSpec;
+  awayTeam: TeamSpec;
+  homeUseAway: boolean;
+  awayUseAway: boolean;
+  difficulty: DifficultyId;
+  tactic?: TacticId;
+  matchDurationSec?: number;
+  lockedPlayerSlot?: number; // for Player Career
+  customPlayer?: PlayerSpec;
+}
+
+export interface MatchResult {
+  homeScore: number;
+  awayScore: number;
+  homeShots: number;
+  awayShots: number;
+  homePossPct: number;
+  awayPossPct: number;
+  userGoals: number;
+  userAssists: number;
+  userPasses: number;
+  userTackles: number;
+  playerRating: number;
+}
