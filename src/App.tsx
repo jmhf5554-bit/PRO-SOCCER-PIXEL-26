@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioFX } from './audio/sound';
 import { ClubCrest, KitSwatch, PlayerSpritePreview } from './components/ClubPreview';
+import { OfflineIndicator, PWAInstallButton } from './components/PWAPrompt';
 import { DIFFICULTIES, LEAGUES, TEAMS, isKitClash } from './data/leagues';
 import { MatchCanvas } from './game/MatchCanvas';
 import { CareerView } from './modes/CareerView';
+import { OnlineAuthSession, OnlineView } from './modes/OnlineView';
 import { TournamentView } from './modes/TournamentView';
 import {
   DifficultyId,
@@ -15,7 +17,7 @@ import {
   WeatherId
 } from './types';
 
-type Screen = 'HOME' | 'QUICK' | 'CAREER' | 'TOURNAMENT' | 'PLAYING' | 'RESULT';
+type Screen = 'HOME' | 'QUICK' | 'CAREER' | 'TOURNAMENT' | 'ONLINE' | 'PLAYING' | 'RESULT';
 
 function calcTeamRatings(team: TeamSpec) {
   const gk = team.players.find((p) => p.role === 'GOL')?.ovr || team.ovr;
@@ -60,11 +62,11 @@ const StadiumNightBackdrop: React.FC = () => {
       const w = (canvas.width = window.innerWidth);
       const h = (canvas.height = window.innerHeight);
 
-      // Deep night stadium atmosphere
+      // Vibrant night stadium atmosphere
       const bg = ctx.createRadialGradient(w * 0.52, h * 0.18, 40, w * 0.5, h * 0.55, Math.max(w, h) * 0.85);
-      bg.addColorStop(0, '#0f2d20');
-      bg.addColorStop(0.45, '#081512');
-      bg.addColorStop(1, '#04070d');
+      bg.addColorStop(0, '#12422d');
+      bg.addColorStop(0.45, '#091f1a');
+      bg.addColorStop(1, '#050b16');
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
 
@@ -86,9 +88,9 @@ const StadiumNightBackdrop: React.FC = () => {
         ctx.restore();
       };
 
-      drawBeam(w * 0.12, -20, Math.PI * 0.34 + Math.sin(t) * 0.07, 0.16, 'rgba(52, 211, 153, 0.08)');
-      drawBeam(w * 0.88, -20, Math.PI * 0.66 + Math.cos(t * 0.9) * 0.07, 0.16, 'rgba(250, 204, 21, 0.065)');
-      drawBeam(w * 0.5, -40, Math.PI * 0.5 + Math.sin(t * 0.6) * 0.04, 0.22, 'rgba(248, 250, 252, 0.045)');
+      drawBeam(w * 0.12, -20, Math.PI * 0.34 + Math.sin(t) * 0.07, 0.16, 'rgba(34, 211, 238, 0.11)');
+      drawBeam(w * 0.88, -20, Math.PI * 0.66 + Math.cos(t * 0.9) * 0.07, 0.16, 'rgba(250, 204, 21, 0.1)');
+      drawBeam(w * 0.5, -40, Math.PI * 0.5 + Math.sin(t * 0.6) * 0.04, 0.22, 'rgba(52, 211, 153, 0.09)');
 
       // Subtle turf perspective lines near bottom edge
       ctx.strokeStyle = 'rgba(16, 185, 129, 0.08)';
@@ -124,6 +126,7 @@ const StadiumNightBackdrop: React.FC = () => {
 export default function App() {
   const [screen, setScreen] = useState<Screen>('HOME');
   const [muted, setMuted] = useState(AudioFX.isMuted());
+  const [onlineSession, setOnlineSession] = useState<OnlineAuthSession | null>(null);
 
   // Quick Match / 2P / Training state
   const [quickMode, setQuickMode] = useState<'quick' | 'two_player' | 'training'>('quick');
@@ -175,31 +178,37 @@ export default function App() {
 
   const toggleMute = () => setMuted(AudioFX.setMuted(!AudioFX.isMuted()));
 
-  if (screen === 'PLAYING' && activeMatch) {
-    return (
-      <div className="w-screen h-screen bg-[#07130d]">
-        <MatchCanvas
-          config={activeMatch}
-          onFinish={handleMatchFinish}
-          onExit={() => setScreen(returnScreenRef.current)}
-        />
-      </div>
-    );
-  }
+  const isOnlineMatch =
+    activeMatch?.mode === 'online_host' || activeMatch?.mode === 'online_guest';
+  const keepOnlineAlive =
+    screen === 'ONLINE' ||
+    ((screen === 'PLAYING' || screen === 'RESULT') && isOnlineMatch);
 
   return (
-    <div className="w-screen min-h-screen bg-[#04070d] text-slate-100 flex items-center justify-center p-4 sm:p-6 overflow-y-auto relative">
-      <StadiumNightBackdrop />
+    <>
+      {screen === 'PLAYING' && activeMatch && (
+        <div className="w-screen h-[100dvh] bg-[#07130d] overflow-hidden">
+          <MatchCanvas
+            config={activeMatch}
+            onFinish={handleMatchFinish}
+            onExit={() => setScreen(returnScreenRef.current)}
+          />
+        </div>
+      )}
 
-      <div className="relative z-10 w-full max-w-6xl">
+      {screen !== 'PLAYING' && (
+        <div className="w-screen min-h-[100dvh] bg-[#04070d] text-slate-100 flex items-center justify-center p-3 sm:p-6 overflow-y-auto relative">
+          <StadiumNightBackdrop />
+
+          <div className="relative z-10 w-full max-w-6xl">
         {/* ==================== CINEMATIC EA FC HOME SCREEN ==================== */}
         {screen === 'HOME' && (
-          <div className="space-y-5">
+          <div className="space-y-4 sm:space-y-5">
             {/* Top Broadcast Header */}
-            <header className="bg-slate-950/75 backdrop-blur-xl border border-white/15 rounded-2xl px-5 py-3.5 flex flex-wrap items-center justify-between gap-4 shadow-2xl">
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 via-emerald-700 to-slate-950 border border-amber-400/60 flex items-center justify-center shadow-lg">
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <header className="bg-slate-950/75 backdrop-blur-xl border border-white/15 rounded-2xl px-4 py-3 sm:px-5 sm:py-3.5 flex flex-wrap items-center justify-between gap-3 sm:gap-4 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-emerald-500 via-emerald-700 to-slate-950 border border-amber-400/60 flex items-center justify-center shadow-lg shrink-0">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <circle cx="12" cy="12" r="9" fill="#f8fafc" stroke="#0f172a" strokeWidth="1.5" />
                     <polygon points="12,6.8 15.6,9.5 14.2,13.8 9.8,13.8 8.4,9.5" fill="#0f172a" />
                   </svg>
@@ -208,14 +217,17 @@ export default function App() {
                   <h1 className="font-display text-2xl sm:text-3xl font-black tracking-tight uppercase leading-none">
                     BR<span className="text-amber-400">FC</span>
                   </h1>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Edição Brasileira &amp; Mundial · 8 Ligas · Narração ao Vivo
+                  <p className="text-[11px] sm:text-xs text-slate-300 mt-0.5">
+                    28 Ligas · 20 Times/Liga · Mobile &amp; PC · Online
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2.5">
-                <div className="flex items-center bg-slate-900/90 border border-white/10 rounded-xl p-1 gap-1">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                <OfflineIndicator />
+                <PWAInstallButton />
+
+                <div className="flex items-center bg-slate-900/90 border border-white/10 rounded-xl p-1 gap-1 overflow-x-auto max-w-full">
                   {(Object.keys(DIFFICULTIES) as DifficultyId[]).map((d) => (
                     <button
                       key={d}
@@ -224,7 +236,7 @@ export default function App() {
                         AudioFX.playSelectBeep(true);
                         setDifficulty(d);
                       }}
-                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition ${
+                      className={`min-h-[34px] px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition ${
                         difficulty === d
                           ? 'bg-amber-400 text-slate-950 shadow'
                           : 'text-slate-300 hover:text-white hover:bg-slate-800'
@@ -238,7 +250,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={toggleMute}
-                  className="min-h-[36px] px-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-white/15 text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition"
+                  className="min-h-[40px] px-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-white/15 text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition"
                 >
                   {muted ? 'Som: Mudo' : 'Som: Ligado'}
                 </button>
@@ -247,7 +259,7 @@ export default function App() {
 
             {/* Main Grid: 4 Mode Cards (Left) + Season Spotlight Showcase (Right) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-              <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <button
                   type="button"
                   onClick={() => {
@@ -255,22 +267,22 @@ export default function App() {
                     setQuickMode('quick');
                     setScreen('QUICK');
                   }}
-                  className="group relative overflow-hidden p-5 rounded-2xl bg-gradient-to-br from-emerald-950/85 via-slate-900/85 to-slate-950/90 backdrop-blur-xl border border-emerald-500/40 hover:border-amber-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[168px]"
+                  className="group relative overflow-hidden p-4 rounded-2xl bg-gradient-to-br from-emerald-900/85 via-slate-900/85 to-teal-950/90 backdrop-blur-xl border border-emerald-400/50 hover:border-amber-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[146px]"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-amber-300">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/25 border border-emerald-400/50 flex items-center justify-center text-amber-300">
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <polygon points="6 3 20 12 6 21 6 3" />
                       </svg>
                     </div>
                     <span className="font-mono text-[11px] font-bold text-emerald-300">1P / 2P LOCAL</span>
                   </div>
-                  <div className="mt-4">
+                  <div className="mt-3">
                     <div className="font-display text-xl font-black text-white group-hover:text-amber-300 transition">
                       Jogo Rápido
                     </div>
-                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                      Escolha clubes, uniformes titular/reserva, estádio e duração de 3, 5 ou 8 minutos.
+                    <p className="text-xs text-slate-200 mt-1 leading-relaxed">
+                      Escolha entre 28 ligas (20 clubes cada), uniformes titular/reserva e duração da partida.
                     </p>
                   </div>
                 </button>
@@ -281,10 +293,10 @@ export default function App() {
                     AudioFX.playSelectBeep(true);
                     setScreen('CAREER');
                   }}
-                  className="group relative overflow-hidden p-5 rounded-2xl bg-gradient-to-br from-slate-900/85 via-slate-900/80 to-sky-950/70 backdrop-blur-xl border border-white/15 hover:border-amber-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[168px]"
+                  className="group relative overflow-hidden p-4 rounded-2xl bg-gradient-to-br from-sky-900/80 via-slate-900/85 to-indigo-950/85 backdrop-blur-xl border border-sky-400/45 hover:border-amber-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[146px]"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-300">
+                    <div className="w-10 h-10 rounded-xl bg-sky-500/25 border border-sky-400/50 flex items-center justify-center text-sky-300">
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
                         <circle cx="9" cy="7" r="4" />
@@ -294,12 +306,12 @@ export default function App() {
                     </div>
                     <span className="font-mono text-[11px] font-bold text-sky-300">TREINADOR · JOGADOR</span>
                   </div>
-                  <div className="mt-4">
+                  <div className="mt-3">
                     <div className="font-display text-xl font-black text-white group-hover:text-amber-300 transition">
                       Modo Carreira
                     </div>
-                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                      Negocie salários no mercado, controle fadiga e lesões ou crie seu craque em campo.
+                    <p className="text-xs text-slate-200 mt-1 leading-relaxed">
+                      Temporada com 20 times em qualquer liga, mercado de transferências ou crie seu craque.
                     </p>
                   </div>
                 </button>
@@ -310,10 +322,10 @@ export default function App() {
                     AudioFX.playSelectBeep(true);
                     setScreen('TOURNAMENT');
                   }}
-                  className="group relative overflow-hidden p-5 rounded-2xl bg-gradient-to-br from-slate-900/85 via-slate-900/80 to-amber-950/60 backdrop-blur-xl border border-white/15 hover:border-amber-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[168px]"
+                  className="group relative overflow-hidden p-4 rounded-2xl bg-gradient-to-br from-amber-900/75 via-slate-900/85 to-rose-950/75 backdrop-blur-xl border border-amber-400/45 hover:border-amber-300 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[146px]"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/25 border border-amber-400/50 flex items-center justify-center text-amber-300">
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
                         <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
@@ -323,14 +335,14 @@ export default function App() {
                         <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
                       </svg>
                     </div>
-                    <span className="font-mono text-[11px] font-bold text-amber-300">7 COMPETIÇÕES</span>
+                    <span className="font-mono text-[11px] font-bold text-amber-300">27 LIGAS · 3 COPAS</span>
                   </div>
-                  <div className="mt-4">
+                  <div className="mt-3">
                     <div className="font-display text-xl font-black text-white group-hover:text-amber-300 transition">
                       Torneios &amp; Copas
                     </div>
-                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                      Brasileirão, Libertadores, Copa do Brasil, Copa do Mundo e ligas europeias com chaveamento.
+                    <p className="text-xs text-slate-200 mt-1 leading-relaxed">
+                      Séries A/B/C/D, ligas europeias e sul-americanas com 20 clubes, Libertadores e Copa do Mundo.
                     </p>
                   </div>
                 </button>
@@ -342,10 +354,10 @@ export default function App() {
                     setQuickMode('training');
                     setScreen('QUICK');
                   }}
-                  className="group relative overflow-hidden p-5 rounded-2xl bg-gradient-to-br from-slate-900/85 via-slate-900/80 to-cyan-950/65 backdrop-blur-xl border border-white/15 hover:border-cyan-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[168px]"
+                  className="group relative overflow-hidden p-4 rounded-2xl bg-gradient-to-br from-fuchsia-900/65 via-slate-900/85 to-cyan-950/80 backdrop-blur-xl border border-fuchsia-400/40 hover:border-cyan-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col justify-between min-h-[146px]"
                 >
                   <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300">
+                    <div className="w-10 h-10 rounded-xl bg-cyan-500/25 border border-cyan-400/50 flex items-center justify-center text-cyan-300">
                       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                         <circle cx="12" cy="12" r="10" />
                         <circle cx="12" cy="12" r="6" />
@@ -354,13 +366,45 @@ export default function App() {
                     </div>
                     <span className="font-mono text-[11px] font-bold text-cyan-300">4 DESAFIOS</span>
                   </div>
-                  <div className="mt-4">
+                  <div className="mt-3">
                     <div className="font-display text-xl font-black text-white group-hover:text-cyan-300 transition">
                       Arena de Treino
                     </div>
-                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    <p className="text-xs text-slate-200 mt-1 leading-relaxed">
                       Treino livre, faltas com alvos na gaveta, série de pênaltis e cruzamentos para voleio.
                     </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    AudioFX.playSelectBeep(true);
+                    setScreen('ONLINE');
+                  }}
+                  className="sm:col-span-2 group relative overflow-hidden p-4 rounded-2xl bg-gradient-to-r from-cyan-950/90 via-indigo-950/85 to-emerald-950/90 backdrop-blur-xl border border-cyan-400/55 hover:border-amber-400 text-left transition-all duration-200 hover:-translate-y-0.5 shadow-2xl cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-xl bg-cyan-500/25 border border-cyan-300/50 flex items-center justify-center text-cyan-200 shrink-0">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="2" y1="12" x2="22" y2="12" />
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="font-display text-xl font-black text-white group-hover:text-amber-300 transition">
+                        Multiplayer Online &amp; Ranking
+                      </div>
+                      <p className="text-xs text-slate-200 mt-0.5">
+                        Salas 1v1 em tempo real, chat no vestiário, contas persistentes no banco de dados SQLite e ranking ELO.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-500/25 border border-emerald-400/40 text-emerald-200">
+                      {onlineSession ? onlineSession.player.nickname : '1v1 ONLINE'}
+                    </span>
                   </div>
                 </button>
               </div>
@@ -442,16 +486,16 @@ export default function App() {
             {/* Clean Controls Strip */}
             <footer className="bg-slate-950/70 backdrop-blur-md border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-400 flex flex-wrap justify-between gap-2">
               <span>
-                <strong className="text-slate-200">Controles:</strong> WASD/Setas · Shift Trocar/Sprint · J Passe · H Enfiada · L Cruzamento · K Chute/Carrinho · Espaço Proteger/Corte
+                <strong className="text-slate-200">Controles:</strong> Mobile (Analógico + Botões na tela) · PC (WASD/Setas · J Passe · H Enfiada · L Cruzamento · Espaço / K Chute · C Cortar)
               </span>
-              <span className="font-mono">P / Esc Pausar · M Som</span>
+              <span className="font-mono hidden sm:inline">P / Esc Pausar · M Som</span>
             </footer>
           </div>
         )}
 
         {/* ==================== QUICK MATCH / 2P / TRAINING SETUP ==================== */}
         {screen === 'QUICK' && (
-          <div className="w-full max-w-6xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-white/15 rounded-2xl p-5 space-y-4 shadow-2xl max-h-[94vh] overflow-y-auto">
+          <div className="w-full max-w-6xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-white/15 rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xl max-h-[94dvh] overflow-y-auto">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3.5">
               <div>
                 <h2 className="font-display text-xl font-black text-amber-400 uppercase tracking-tight">
@@ -749,8 +793,8 @@ export default function App() {
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
               <div className="text-xs text-slate-400">
                 {quickMode === 'two_player'
-                  ? 'P1: WASD + Shift + J (Passe) + K (Chute) · P2: Setas + Ctrl/,(Trocar) + N (Passe) + M/Enter (Chute)'
-                  : 'WASD/Setas Mover · Shift Trocar/Sprint · J Passe · H Enfiada · L Cruzamento · K Chute/Carrinho · Espaço Proteger'}
+                  ? 'P1: WASD + Shift + J (Passe) + Espaço / K (Chute) · P2: Setas + Ctrl/,(Trocar) + N (Passe) + M/Enter (Chute)'
+                  : 'Mobile: Analógico + Botões na tela · PC: WASD/Setas · Shift Correr · J Passe · H Enfiada · L Cruzamento · Espaço/K Chute · C Cortar'}
               </div>
               <button
                 type="button"
@@ -771,7 +815,7 @@ export default function App() {
                     'QUICK'
                   )
                 }
-                className="min-h-[46px] px-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-black uppercase tracking-wider text-white shadow-lg cursor-pointer"
+                className="w-full sm:w-auto min-h-[48px] px-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-black uppercase tracking-wider text-white shadow-lg cursor-pointer"
               >
                 {quickMode === 'training' ? 'Entrar na Arena' : 'Iniciar Partida'}
               </button>
@@ -853,7 +897,26 @@ export default function App() {
             </div>
           </div>
         )}
-      </div>
-    </div>
+          </div>
+        </div>
+      )}
+
+      {keepOnlineAlive && (
+        <div
+          className={
+            screen === 'ONLINE'
+              ? 'fixed inset-0 z-20 flex items-center justify-center p-4 sm:p-6 overflow-y-auto pointer-events-auto'
+              : 'hidden'
+          }
+        >
+          <OnlineView
+            session={onlineSession}
+            onSessionChange={setOnlineSession}
+            onBack={() => setScreen('HOME')}
+            onStartOnlineMatch={(cfg, cb) => launchMatch(cfg, 'ONLINE', cb)}
+          />
+        </div>
+      )}
+    </>
   );
 }

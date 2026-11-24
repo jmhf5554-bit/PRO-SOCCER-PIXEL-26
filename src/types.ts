@@ -105,9 +105,68 @@ export interface LeagueSpec {
   isNational?: boolean;
 }
 
-export type GameMode = 'quick' | 'two_player' | 'training' | 'tournament' | 'career_manager' | 'career_player';
+export type GameMode =
+  | 'quick'
+  | 'two_player'
+  | 'training'
+  | 'tournament'
+  | 'career_manager'
+  | 'career_player'
+  | 'online_host'
+  | 'online_guest';
 export type TrainingChallengeId = 'free' | 'free_kicks' | 'penalties' | 'finishing_cross';
 export type TacticId = 'equilibrado' | 'ofensivo' | 'retranca';
+
+export interface OnlineGuestInput {
+  ix: number;
+  iy: number;
+  sprint: boolean;
+  passJust: boolean;
+  shootHeld: boolean;
+  shootJust: boolean;
+  shootReleased: boolean;
+  switchJust: boolean;
+}
+
+export interface OnlineSyncedState {
+  state: string;
+  elapsed: number;
+  homeScore: number;
+  awayScore: number;
+  camX: number;
+  camY: number;
+  bannerText: string;
+  bannerSub: string;
+  bannerTimer: number;
+  ball: { x: number; y: number; z: number; spin: number; ownerId: string | null };
+  ref: { x: number; y: number; dirX: number; frame: number; animTime: number };
+  activeHomeId: string | null;
+  activeAwayId: string | null;
+  p1Power: number;
+  p2Power: number;
+  players: {
+    id: string;
+    x: number;
+    y: number;
+    dirX: number;
+    frame: number;
+    animTime: number;
+    action: 'idle' | 'run' | 'kick' | 'tackle' | 'dive' | 'celebrate' | 'volley';
+    diveDir: number;
+    ejected: boolean;
+    stamina: number;
+  }[];
+}
+
+export interface OnlineBridge {
+  sendState?: (payload: OnlineSyncedState) => void;
+  sendGuestInput?: (input: OnlineGuestInput) => void;
+  onGuestInput?: (handler: (input: OnlineGuestInput) => void) => () => void;
+  onRemoteState?: (handler: (payload: OnlineSyncedState) => void) => () => void;
+  roomCode?: string;
+  hostNickname?: string;
+  guestNickname?: string;
+}
 
 export interface MatchConfig {
   mode: GameMode;
@@ -124,6 +183,7 @@ export interface MatchConfig {
   matchDurationSec?: number;
   lockedPlayerSlot?: number; // for Player Career
   customPlayer?: PlayerSpec;
+  onlineBridge?: OnlineBridge;
 }
 
 export interface MatchResult {

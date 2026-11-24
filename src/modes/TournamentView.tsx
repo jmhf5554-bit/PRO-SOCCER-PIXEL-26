@@ -1,32 +1,40 @@
 import React, { useMemo, useState } from 'react';
 import { ChampionshipTrophy, ClubCrest } from '../components/ClubPreview';
-import { DIFFICULTIES, TEAMS, isKitClash } from '../data/leagues';
+import { DIFFICULTIES, LEAGUES, TEAMS, isKitClash } from '../data/leagues';
 import { DifficultyId, MatchConfig, MatchResult, TeamSpec } from '../types';
 
-type CompId =
-  | 'brasileirao'
-  | 'laliga'
-  | 'premier'
-  | 'bundesliga'
-  | 'libertadores'
-  | 'copabrasil'
-  | 'copamundo';
+type CompKind = 'league' | 'knockout16' | 'knockout8' | 'worldcup';
 
 interface CompMeta {
-  id: CompId;
+  id: string;
   name: string;
   subtitle: string;
-  format: 'league' | 'knockout16' | 'knockout8' | 'worldcup';
+  format: CompKind;
+  badgeColor: string;
 }
 
-const COMPETITIONS: CompMeta[] = [
-  { id: 'brasileirao', name: 'Brasileirão Série A', subtitle: '8 clubes · Pontos corridos (7 rodadas)', format: 'league' },
-  { id: 'libertadores', name: 'Copa Libertadores', subtitle: '16 clubes sul-americanos · Mata-mata (Oitavas à Final)', format: 'knockout16' },
-  { id: 'copabrasil', name: 'Copa do Brasil', subtitle: '8 clubes nacionais · Mata-mata (Quartas à Final)', format: 'knockout8' },
-  { id: 'copamundo', name: 'Copa do Mundo', subtitle: '8 seleções · Fase de Grupos + Semifinal e Final', format: 'worldcup' },
-  { id: 'laliga', name: 'La Liga', subtitle: '4 clubes espanhóis · Turno e Returno', format: 'league' },
-  { id: 'premier', name: 'Premier League', subtitle: '4 clubes ingleses · Turno e Returno', format: 'league' },
-  { id: 'bundesliga', name: 'Bundesliga', subtitle: '4 clubes alemães · Turno e Returno', format: 'league' }
+const CUP_COMPETITIONS: CompMeta[] = [
+  {
+    id: 'libertadores',
+    name: 'Copa Libertadores',
+    subtitle: '16 clubes sul-americanos · Mata-mata (Oitavas à Final)',
+    format: 'knockout16',
+    badgeColor: 'from-amber-950/80 to-emerald-950/70 border-amber-400/50'
+  },
+  {
+    id: 'copabrasil',
+    name: 'Copa do Brasil',
+    subtitle: '8 clubes nacionais · Mata-mata (Quartas à Final)',
+    format: 'knockout8',
+    badgeColor: 'from-emerald-950/80 to-sky-950/70 border-emerald-400/50'
+  },
+  {
+    id: 'copamundo',
+    name: 'Copa do Mundo',
+    subtitle: '8 seleções sorteadas de 20 · Grupos + Semifinal e Final',
+    format: 'worldcup',
+    badgeColor: 'from-cyan-950/80 to-indigo-950/70 border-cyan-400/50'
+  }
 ];
 
 interface TableRow {
@@ -136,7 +144,10 @@ function pairIntoKnockout(teams: TeamSpec[]): Fixture[] {
 }
 
 export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', onStartMatch, onBack }) => {
-  const [compId, setCompId] = useState<CompId>('brasileirao');
+  const clubLeagues = useMemo(() => LEAGUES.filter((l) => !l.isNational), []);
+  const [compCategory, setCompCategory] = useState<'league' | 'cup'>('league');
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string>('brasileirao');
+  const [selectedCupId, setSelectedCupId] = useState<string>('libertadores');
   const [difficulty, setDifficulty] = useState<DifficultyId>(defaultDifficulty);
   const [userTeamId, setUserTeamId] = useState<string>('flamengo');
   const [started, setStarted] = useState(false);
@@ -153,12 +164,28 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
   const [champion, setChampion] = useState<TeamSpec | null>(null);
   const [scorers, setScorers] = useState<Record<string, ScorerEntry>>({});
 
-  const compMeta = COMPETITIONS.find((c) => c.id === compId)!;
+  const compId = compCategory === 'league' ? selectedLeagueId : selectedCupId;
+
+  const compMeta: CompMeta = useMemo(() => {
+    if (compCategory === 'cup') {
+      return CUP_COMPETITIONS.find((c) => c.id === selectedCupId) || CUP_COMPETITIONS[0];
+    }
+    const lg = clubLeagues.find((l) => l.id === selectedLeagueId) || clubLeagues[0];
+    return {
+      id: lg.id,
+      name: lg.name,
+      subtitle: '20 clubes · Pontos corridos (19 rodadas)',
+      format: 'league',
+      badgeColor: 'from-emerald-950/80 to-slate-900 border-emerald-400/50'
+    };
+  }, [compCategory, selectedLeagueId, selectedCupId, clubLeagues]);
 
   const compTeams = useMemo(() => {
-    if (compId === 'brasileirao' || compId === 'copabrasil') return TEAMS.filter((t) => t.leagueId === 'brasileirao');
+    if (compId === 'copabrasil') return TEAMS.filter((t) => t.leagueId === 'brasileirao' || t.leagueId === 'br_b');
     if (compId === 'libertadores') {
-      return TEAMS.filter((t) => ['brasileirao', 'argentina', 'colombia'].includes(t.leagueId));
+      return TEAMS.filter((t) =>
+        ['brasileirao', 'argentina', 'colombia', 'chile', 'uruguay', 'ecuador', 'paraguay'].includes(t.leagueId)
+      );
     }
     if (compId === 'copamundo') return TEAMS.filter((t) => t.leagueId === 'selecoes');
     return TEAMS.filter((t) => t.leagueId === compId);
@@ -198,20 +225,21 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
       setGroupBRounds([]);
       setStage('group');
     } else if (compMeta.format === 'worldcup') {
-      const ordered = [userTeam, ...compTeams.filter((t) => t.id !== userTeam.id)];
+      const others = compTeams.filter((t) => t.id !== userTeam.id).sort(() => Math.random() - 0.5);
+      const ordered = [userTeam, ...others.slice(0, 7)];
       setRounds(buildRoundRobin(ordered.slice(0, 4)));
       setGroupBRounds(buildRoundRobin(ordered.slice(4, 8)));
       setStage('group');
     } else if (compMeta.format === 'knockout16') {
       const others = compTeams.filter((t) => t.id !== userTeam.id).sort(() => Math.random() - 0.5);
-      const seeded = [userTeam, ...others];
+      const seeded = [userTeam, ...others.slice(0, 15)];
       setRounds([]);
       setGroupBRounds([]);
       setR16Matches(pairIntoKnockout(seeded));
       setStage('r16');
     } else {
       const others = compTeams.filter((t) => t.id !== userTeam.id).sort(() => Math.random() - 0.5);
-      const seeded = [userTeam, ...others];
+      const seeded = [userTeam, ...others.slice(0, 7)];
       setRounds([]);
       setGroupBRounds([]);
       setQfMatches(pairIntoKnockout(seeded));
@@ -222,15 +250,27 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
 
   const groupATeams = useMemo(() => {
     if (compMeta.format !== 'worldcup') return compTeams;
+    const activeIds = new Set<string>();
+    rounds[0]?.forEach((f) => {
+      activeIds.add(f.homeId);
+      activeIds.add(f.awayId);
+    });
+    if (activeIds.size > 0) return compTeams.filter((t) => activeIds.has(t.id));
     const ordered = [userTeam, ...compTeams.filter((t) => t.id !== userTeam.id)];
     return ordered.slice(0, 4);
-  }, [compMeta.format, compTeams, userTeam]);
+  }, [compMeta.format, compTeams, userTeam, rounds]);
 
   const groupBTeams = useMemo(() => {
     if (compMeta.format !== 'worldcup') return [];
+    const activeIds = new Set<string>();
+    groupBRounds[0]?.forEach((f) => {
+      activeIds.add(f.homeId);
+      activeIds.add(f.awayId);
+    });
+    if (activeIds.size > 0) return compTeams.filter((t) => activeIds.has(t.id));
     const ordered = [userTeam, ...compTeams.filter((t) => t.id !== userTeam.id)];
     return ordered.slice(4, 8);
-  }, [compMeta.format, compTeams, userTeam]);
+  }, [compMeta.format, compTeams, userTeam, groupBRounds]);
 
   const tableA = useMemo(() => calcTable(groupATeams, rounds), [groupATeams, rounds]);
   const tableB = useMemo(() => calcTable(groupBTeams, groupBRounds), [groupBTeams, groupBRounds]);
@@ -377,7 +417,12 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
           return;
         }
 
-        const resolveKnockoutRound = (list: Fixture[], nextStage: 'qf' | 'semi' | 'final', setCur: (f: Fixture[]) => void, setNext: (f: Fixture[]) => void) => {
+        const resolveKnockoutRound = (
+          list: Fixture[],
+          nextStage: 'qf' | 'semi' | 'final',
+          setCur: (f: Fixture[]) => void,
+          setNext: (f: Fixture[]) => void
+        ) => {
           const uWin = res.homeScore >= res.awayScore;
           const winners: string[] = [];
           const updated = list.map((m) => {
@@ -456,11 +501,13 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
 
   if (!started) {
     return (
-      <div className="w-full max-w-5xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-white/15 rounded-2xl p-6 space-y-5 shadow-2xl max-h-[94vh] overflow-y-auto">
-        <div className="flex items-center justify-between border-b border-white/10 pb-3.5">
+      <div className="w-full max-w-5xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-emerald-400/30 rounded-2xl p-6 space-y-5 shadow-2xl max-h-[94vh] overflow-y-auto">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3.5">
           <div>
-            <h2 className="font-display text-2xl font-black text-amber-400 tracking-tight uppercase">Torneios & Copas Oficiais</h2>
-            <p className="text-xs text-slate-400">Ligas nacionais/europeias ou Copas com chaveamento visual e artilharia</p>
+            <h2 className="font-display text-2xl font-black bg-gradient-to-r from-amber-300 via-emerald-300 to-cyan-300 bg-clip-text text-transparent tracking-tight uppercase">
+              Torneios &amp; Copas Oficiais
+            </h2>
+            <p className="text-xs text-slate-300">27 Ligas Nacionais e Europeias (20 clubes cada) + Copas Continentais e Mundial</p>
           </div>
           <button
             type="button"
@@ -471,34 +518,95 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {COMPETITIONS.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => {
-                setCompId(c.id);
-                const list =
-                  c.id === 'brasileirao' || c.id === 'copabrasil'
-                    ? TEAMS.filter((t) => t.leagueId === 'brasileirao')
-                    : c.id === 'libertadores'
-                    ? TEAMS.filter((t) => ['brasileirao', 'argentina', 'colombia'].includes(t.leagueId))
-                    : c.id === 'copamundo'
-                    ? TEAMS.filter((t) => t.leagueId === 'selecoes')
-                    : TEAMS.filter((t) => t.leagueId === c.id);
-                if (list[0]) setUserTeamId(list[0].id);
-              }}
-              className={`p-3.5 rounded-xl border text-left cursor-pointer transition ${
-                compId === c.id
-                  ? 'bg-emerald-950/80 border-amber-400 shadow-lg'
-                  : 'bg-slate-900/90 border-white/10 hover:border-white/30'
-              }`}
-            >
-              <div className="font-display text-sm font-extrabold text-white">{c.name}</div>
-              <div className="text-[11px] text-slate-400 mt-1">{c.subtitle}</div>
-            </button>
-          ))}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setCompCategory('league');
+              const first = TEAMS.find((t) => t.leagueId === selectedLeagueId);
+              if (first) setUserTeamId(first.id);
+            }}
+            className={`min-h-[40px] px-4 rounded-xl border text-xs font-extrabold uppercase tracking-wider cursor-pointer transition ${
+              compCategory === 'league'
+                ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 border-emerald-300'
+                : 'bg-slate-900 text-slate-300 border-white/15 hover:border-white/30'
+            }`}
+          >
+            Ligas Nacionais (27 · 20 Times)
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCompCategory('cup');
+              const first =
+                selectedCupId === 'copamundo'
+                  ? TEAMS.find((t) => t.leagueId === 'selecoes')
+                  : TEAMS.find((t) => t.leagueId === 'brasileirao');
+              if (first) setUserTeamId(first.id);
+            }}
+            className={`min-h-[40px] px-4 rounded-xl border text-xs font-extrabold uppercase tracking-wider cursor-pointer transition ${
+              compCategory === 'cup'
+                ? 'bg-gradient-to-r from-amber-400 to-rose-400 text-slate-950 border-amber-300'
+                : 'bg-slate-900 text-slate-300 border-white/15 hover:border-white/30'
+            }`}
+          >
+            Copas &amp; Mata-Mata (3)
+          </button>
         </div>
+
+        {compCategory === 'league' ? (
+          <div className="bg-slate-900/80 border border-emerald-400/25 rounded-xl p-3.5 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-300">
+                Selecione o Campeonato ({clubLeagues.length} ligas · 20 clubes por liga)
+              </span>
+              <span className="text-[11px] text-amber-300 font-bold">19 rodadas de pontos corridos</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+              {clubLeagues.map((lg) => (
+                <button
+                  key={lg.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedLeagueId(lg.id);
+                    const first = TEAMS.find((t) => t.leagueId === lg.id);
+                    if (first) setUserTeamId(first.id);
+                  }}
+                  className={`px-3 py-2 rounded-xl border text-left text-xs font-bold cursor-pointer transition ${
+                    selectedLeagueId === lg.id
+                      ? 'bg-gradient-to-r from-emerald-900/90 to-cyan-950/90 border-amber-400 text-white shadow'
+                      : 'bg-slate-950/90 border-white/10 text-slate-300 hover:border-emerald-400/40'
+                  }`}
+                >
+                  <div className="truncate">{lg.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {CUP_COMPETITIONS.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  setSelectedCupId(c.id);
+                  const list =
+                    c.id === 'copamundo'
+                      ? TEAMS.filter((t) => t.leagueId === 'selecoes')
+                      : TEAMS.filter((t) => t.leagueId === 'brasileirao');
+                  if (list[0]) setUserTeamId(list[0].id);
+                }}
+                className={`p-3.5 rounded-xl border text-left cursor-pointer transition bg-gradient-to-br ${
+                  selectedCupId === c.id ? c.badgeColor : 'from-slate-900 to-slate-950 border-white/10 hover:border-white/30'
+                }`}
+              >
+                <div className="font-display text-sm font-extrabold text-white">{c.name}</div>
+                <div className="text-[11px] text-slate-300 mt-1">{c.subtitle}</div>
+              </button>
+            ))}
+          </div>
+        )}
 
         <div>
           <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Dificuldade</div>
@@ -519,7 +627,9 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
         </div>
 
         <div>
-          <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Escolha sua Equipe ({compTeams.length} participantes)</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+            Escolha sua Equipe ({compTeams.length} disponíveis · {compMeta.name})
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-52 overflow-y-auto pr-1">
             {compTeams.map((t) => (
               <button
@@ -542,9 +652,9 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
           <button
             type="button"
             onClick={startCompetition}
-            className="min-h-[46px] px-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-extrabold uppercase tracking-wider text-white shadow-lg cursor-pointer"
+            className="min-h-[46px] px-8 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-sm font-extrabold uppercase tracking-wider text-slate-950 shadow-lg cursor-pointer"
           >
-            Iniciar Competição
+            Iniciar {compMeta.name}
           </button>
         </div>
       </div>
@@ -603,7 +713,7 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
   };
 
   return (
-    <div className="w-full max-w-6xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-white/15 rounded-2xl p-5 space-y-4 shadow-2xl max-h-[94vh] overflow-y-auto">
+    <div className="w-full max-w-6xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-emerald-400/30 rounded-2xl p-5 space-y-4 shadow-2xl max-h-[94vh] overflow-y-auto">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3.5">
         <div className="flex items-center gap-3">
           <ClubCrest team={userTeam} className="w-8 h-8" />
@@ -650,7 +760,7 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
           </div>
         </div>
       ) : nextFx && nextOpp ? (
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-slate-900 to-emerald-950/45 border border-white/15 rounded-xl p-4">
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-slate-900 to-emerald-950/55 border border-emerald-400/25 rounded-xl p-4">
           <div className="flex flex-wrap items-center gap-4">
             <span className="text-xs font-extrabold uppercase tracking-wider text-amber-400">{stageLabel}</span>
             <div className="flex items-center gap-2.5 font-extrabold text-sm sm:text-base text-white">
@@ -664,14 +774,14 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
           <button
             type="button"
             onClick={playNextFixture}
-            className="min-h-[44px] px-7 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-extrabold text-white shadow-lg cursor-pointer"
+            className="min-h-[44px] px-7 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-sm font-extrabold text-slate-950 shadow-lg cursor-pointer"
           >
             Jogar Partida
           </button>
         </div>
       ) : null}
 
-      {/* Visual Horizontal Knockout Bracket (Cups & World Cup Knockout) */}
+      {/* Visual Horizontal Knockout Bracket */}
       {(r16Matches.length > 0 || qfMatches.length > 0 || semiMatches.length > 0 || finalMatch) && (
         <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-3 overflow-x-auto">
           <div className="text-xs font-extrabold text-amber-400 uppercase tracking-wider">Chaveamento Visual (Mata-Mata)</div>
@@ -709,10 +819,10 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
         {(compMeta.format === 'league' || compMeta.format === 'worldcup') && (
           <div className="lg:col-span-2 grid grid-cols-1 gap-4">
             {[
-              { title: compMeta.format === 'league' ? 'Classificação Geral' : 'Grupo A', rows: tableA },
+              { title: compMeta.format === 'league' ? `Classificação Geral (${tableA.length} clubes)` : 'Grupo A', rows: tableA },
               ...(compMeta.format === 'worldcup' ? [{ title: 'Grupo B', rows: tableB }] : [])
             ].map((grp) => (
-              <div key={grp.title} className="bg-slate-900/70 border border-white/10 rounded-xl p-3.5 overflow-x-auto">
+              <div key={grp.title} className="bg-slate-900/70 border border-white/10 rounded-xl p-3.5 overflow-x-auto max-h-[420px] overflow-y-auto">
                 <div className="text-xs font-extrabold text-slate-300 uppercase mb-2">{grp.title}</div>
                 <table className="w-full text-xs tabular-nums">
                   <thead>
@@ -732,7 +842,13 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
                       <tr
                         key={r.team.id}
                         className={`border-b border-white/5 ${
-                          r.team.id === userTeam.id ? 'bg-emerald-950/60 font-bold text-amber-300' : 'text-slate-200'
+                          r.team.id === userTeam.id
+                            ? 'bg-emerald-950/60 font-bold text-amber-300'
+                            : idx < 4 && compMeta.format === 'league'
+                            ? 'text-emerald-200'
+                            : idx >= grp.rows.length - 4 && compMeta.format === 'league'
+                            ? 'text-rose-300'
+                            : 'text-slate-200'
                         }`}
                       >
                         <td className="py-1.5 pr-2">{idx + 1}</td>
@@ -755,7 +871,11 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
           </div>
         )}
 
-        <div className={`${compMeta.format === 'league' || compMeta.format === 'worldcup' ? '' : 'lg:col-span-3'} bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-2.5`}>
+        <div
+          className={`${
+            compMeta.format === 'league' || compMeta.format === 'worldcup' ? '' : 'lg:col-span-3'
+          } bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-2.5`}
+        >
           <div className="text-xs font-extrabold uppercase text-amber-400">Artilharia da Competição</div>
           {topScorers.length === 0 ? (
             <p className="text-xs text-slate-400">Os artilheiros aparecerão após a primeira partida.</p>

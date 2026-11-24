@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Narrator } from '../audio/narrator';
 import { AudioFX } from '../audio/sound';
 import { ClubCrest } from '../components/ClubPreview';
+import { MobileControls, TouchInputState, createEmptyTouchInput } from '../components/MobileControls';
 import { DIFFICULTIES, getTeamBench } from '../data/leagues';
 import {
   FormationId,
   MatchConfig,
   MatchResult,
   MentalityId,
+  OnlineGuestInput,
+  OnlineSyncedState,
   PlayerSpec,
   TeamSpec,
   WeatherId
@@ -200,7 +203,13 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
   const [voiceOn, setVoiceOn] = useState(() => Narrator.isVoiceEnabled());
   const [commentary, setCommentary] = useState('Escalações confirmadas! Vai começar o espetáculo!');
   const [isReplay, setIsReplay] = useState(false);
-  const [isPreMatch, setIsPreMatch] = useState(config.mode !== 'training');
+  const isOnlineMode = config.mode === 'online_host' || config.mode === 'online_guest';
+  const [isPreMatch, setIsPreMatch] = useState(config.mode !== 'training' && !isOnlineMode);
+  const [showTouchControls, setShowTouchControls] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return Boolean(window.matchMedia?.('(pointer: coarse)')?.matches || navigator.maxTouchPoints > 0);
+  });
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const initialMentality: MentalityId =
     config.mentality ||
@@ -227,6 +236,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     p1Role: config.homeTeam.players[4].role,
     p1Power: 0,
     p1Stamina: 100,
+    p1HasBall: false,
+    inSetPiece: false,
     p2Name: config.awayTeam.players[4].name,
     p2Num: config.awayTeam.players[4].num,
     p2Role: config.awayTeam.players[4].role,
@@ -246,6 +257,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     penHistory: [] as ('goal' | 'miss')[]
   });
 
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const touchInputRef = useRef<TouchInputState>(createEmptyTouchInput());
   const pausedRef = useRef(false);
   const finishedRef = useRef(false);
   const skipReplayRef = useRef(false);
@@ -279,7 +292,24 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
   useEffect(() => {
     setMuted(AudioFX.isMuted());
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await containerRef.current?.requestFullscreen?.();
+        const orient = (window.screen as Screen & { orientation?: { lock?: (o: string) => Promise<void> } }).orientation;
+        await orient?.lock?.('landscape').catch(() => {});
+      } else {
+        await document.exitFullscreen?.();
+      }
+    } catch {
+      // Ignore fullscreen denial in restricted iframes
+    }
+  };
 
   useEffect(() => {
     if (homeJerseyRef.current) drawMiniJerseyIcon(homeJerseyRef.current, config.homeTeam, config.homeUseAway);
@@ -300,6 +330,10 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     const matchDuration = config.matchDurationSec || 90;
     const isTraining = config.mode === 'training';
     const isTwoPlayer = config.mode === 'two_player';
+    const isOnlineHost = config.mode === 'online_host';
+    const isOnlineGuest = config.mode === 'online_guest';
+    const isOnline = isOnlineHost || isOnlineGuest;
+    const hasHumanAway = isTwoPlayer || isOnlineHost;
     const lockedIdx = config.lockedPlayerSlot;
 
     const announce = (txt: string, priority = false) => {
@@ -364,7 +398,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     };
 
     const g = {
-      state: (isTraining ? 'PLAYING' : 'PRE_MATCH') as
+      state: (isTraining || isOnline ? 'PLAYING' : 'PRE_MATCH') as
         | 'PRE_MATCH'
         | 'PLAYING'
         | 'SET_PIECE'
@@ -372,7 +406,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         | 'REPLAY'
         | 'RESTART_FREEZE'
         | 'ENDED',
-      preMatchTimer: isTraining ? 0 : 2.9,
+      preMatchTimer: isTraining || isOnline ? 0 : 2.9,
       homeScore: 0,
       awayScore: 0,
       homeShots: 0,
@@ -392,11 +426,13 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       netRippleRight: 0,
       lastGoalTeam: 'home' as 'home' | 'away',
       lastScorer: null as PlayerEntity | null,
-      bannerText: isTraining ? 'ARENA DE TREINO' : 'TRANSMISSÃO AO VIVO',
+      bannerText: isTraining ? 'ARENA DE TREINO' : isOnline ? 'PARTIDA ONLINE' : 'TRANSMISSÃO AO VIVO',
       bannerSub: isTraining
         ? 'Treine chutes, passes, cruzamentos e drible'
+        : isOnline
+        ? `${config.homeTeam.abbr} vs ${config.awayTeam.abbr} · Ao Vivo`
         : `${config.homeTeam.name} vs ${config.awayTeam.name} · ${diff.label}`,
-      bannerTimer: isTraining ? 1.8 : 0,
+      bannerTimer: isTraining || isOnline ? 1.8 : 0,
       cardBanner: null as { color: 'yellow' | 'red'; playerName: string; abbr: string; timer: number } | null,
       camX: 0,
       camY: 0,
@@ -557,7 +593,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         }
         setupSetPiece('penalty', 'home', PITCH.halfW - 82, 0);
         g.bannerText = `PÊNALTI ${g.training.penHistory.length + 1}/5`;
-        g.bannerSub = 'W/S escolhe o canto · Segure K para bater!';
+        g.bannerSub = 'W/S escolhe o canto · Segure Espaço ou K para bater!';
         g.bannerTimer = 1.4;
         return;
       }
@@ -623,6 +659,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       announce('Arena de Treino pronta! Escolha um desafio ou treine livre.', true);
     } else {
       resetPositions('home');
+      if (isOnline) AudioFX.playWhistle('kickoff');
       announce(`Transmissão ao vivo! ${config.homeTeam.name} enfrenta ${config.awayTeam.name}.`, true);
     }
 
@@ -630,6 +667,76 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     const keysJust = new Set<string>();
     let p1ShootReleased = false;
     let p2ShootReleased = false;
+
+    const remoteGuestInput: OnlineGuestInput = {
+      ix: 0,
+      iy: 0,
+      sprint: false,
+      passJust: false,
+      shootHeld: false,
+      shootJust: false,
+      shootReleased: false,
+      switchJust: false
+    };
+
+    const unsubGuestInput =
+      isOnlineHost && config.onlineBridge?.onGuestInput
+        ? config.onlineBridge.onGuestInput((inp) => {
+            remoteGuestInput.ix = inp.ix;
+            remoteGuestInput.iy = inp.iy;
+            remoteGuestInput.sprint = inp.sprint;
+            remoteGuestInput.shootHeld = inp.shootHeld;
+            if (inp.passJust) remoteGuestInput.passJust = true;
+            if (inp.shootJust) remoteGuestInput.shootJust = true;
+            if (inp.shootReleased) remoteGuestInput.shootReleased = true;
+            if (inp.switchJust) remoteGuestInput.switchJust = true;
+          })
+        : () => {};
+
+    const unsubRemoteState =
+      isOnlineGuest && config.onlineBridge?.onRemoteState
+        ? config.onlineBridge.onRemoteState((st: OnlineSyncedState) => {
+            g.state = (st.state as typeof g.state) || 'PLAYING';
+            g.elapsed = st.elapsed;
+            g.homeScore = st.homeScore;
+            g.awayScore = st.awayScore;
+            g.camX = st.camX;
+            g.camY = st.camY;
+            g.bannerText = st.bannerText;
+            g.bannerSub = st.bannerSub;
+            g.bannerTimer = st.bannerTimer;
+            g.p1Power = st.p1Power;
+            g.p2Power = st.p2Power;
+            g.ball.x = st.ball.x;
+            g.ball.y = st.ball.y;
+            g.ball.z = st.ball.z;
+            g.ball.spin = st.ball.spin;
+            g.ball.owner = st.ball.ownerId ? g.players.find((p) => p.id === st.ball.ownerId) || null : null;
+            g.ref.x = st.ref.x;
+            g.ref.y = st.ref.y;
+            g.ref.dirX = st.ref.dirX;
+            g.ref.frame = st.ref.frame;
+            g.ref.animTime = st.ref.animTime;
+            if (st.activeHomeId) g.activeHome = g.players.find((p) => p.id === st.activeHomeId) || g.activeHome;
+            if (st.activeAwayId) g.activeAway = g.players.find((p) => p.id === st.activeAwayId) || g.activeAway;
+            for (const sp of st.players) {
+              const target = g.players.find((p) => p.id === sp.id);
+              if (!target) continue;
+              target.x = sp.x;
+              target.y = sp.y;
+              target.dirX = sp.dirX;
+              target.frame = sp.frame;
+              target.animTime = sp.animTime;
+              target.action = sp.action;
+              target.diveDir = sp.diveDir;
+              target.ejected = sp.ejected;
+              target.stamina = sp.stamina;
+            }
+            if (st.state === 'ENDED') {
+              finishGameNow();
+            }
+          })
+        : () => {};
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
@@ -654,7 +761,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'KeyK' || e.code === 'KeyZ') p1ShootReleased = true;
+      if (e.code === 'Space' || e.code === 'KeyK' || e.code === 'KeyZ') p1ShootReleased = true;
       if (e.code === 'KeyM' || e.code === 'Numpad2' || e.code === 'Enter') p2ShootReleased = true;
       keysHeld.delete(e.code);
     };
@@ -705,19 +812,19 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     };
 
     const spawnConfetti = (gx: number, gy: number, team: TeamSpec) => {
-      const colors = [team.kit.c1, team.kit.c2, '#facc15', '#ffffff'];
-      for (let i = 0; i < 48; i++) {
+      const colors = [team.kit.c1, team.kit.c2, '#facc15', '#22d3ee', '#ec4899', '#4ade80', '#f97316', '#ffffff'];
+      for (let i = 0; i < 64; i++) {
         g.particles.push({
-          x: gx + (Math.random() - 0.5) * 44,
-          y: gy + (Math.random() - 0.5) * 90,
-          z: 8 + Math.random() * 26,
-          vx: (Math.random() - 0.5) * 145,
-          vy: (Math.random() - 0.5) * 95,
-          vz: 70 + Math.random() * 95,
+          x: gx + (Math.random() - 0.5) * 48,
+          y: gy + (Math.random() - 0.5) * 96,
+          z: 8 + Math.random() * 28,
+          vx: (Math.random() - 0.5) * 155,
+          vy: (Math.random() - 0.5) * 100,
+          vz: 75 + Math.random() * 100,
           life: 1.0 + Math.random() * 0.9,
           maxLife: 1.9,
           color: colors[i % colors.length],
-          size: 4.5
+          size: 4.8
         });
       }
     };
@@ -823,7 +930,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       if (target) {
         if (passer.side === 'home' && target.data.role !== 'GOL' && lockedIdx === undefined) g.activeHome = target;
-        if (passer.side === 'away' && target.data.role !== 'GOL' && isTwoPlayer) g.activeAway = target;
+        if (passer.side === 'away' && target.data.role !== 'GOL' && hasHumanAway) g.activeAway = target;
         if (Math.random() < 0.34) {
           announce(
             kind === 'through'
@@ -863,7 +970,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       const goalX = PITCH.halfW * attackDir;
 
       let targetY: number;
-      if (shooter.side === 'away' && !isTwoPlayer) {
+      if (shooter.side === 'away' && !hasHumanAway) {
         const chosenCorner = shooter.y >= 0 ? -1 : 1;
         const cornerSign = Math.random() < 0.72 ? chosenCorner : -chosenCorner;
         const cornerY = cornerSign * (PITCH.goalHalfW - 9);
@@ -1017,7 +1124,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           wp.action = 'idle';
         });
         g.bannerText = 'COBRANÇA DE FALTA';
-        g.bannerSub = `${side === 'home' ? config.homeTeam.abbr : config.awayTeam.abbr} · W/S Mira · A/D Curva · K Chuta`;
+        g.bannerSub = `${side === 'home' ? config.homeTeam.abbr : config.awayTeam.abbr} · W/S Mira · A/D Curva · Espaço/K Chuta`;
       }
 
       g.bannerTimer = 1.65;
@@ -1053,8 +1160,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       let cardType: 'yellow' | 'red' | null = null;
       if (fromBehind && insideBox) {
-        cardType = 'red';
-      } else if (fromBehind || Math.random() < 0.7) {
+        cardType = Math.random() < 0.22 ? 'red' : 'yellow';
+      } else if ((fromBehind || Math.random() < 0.22) && Math.random() < 0.35) {
         offender.yellowCards++;
         cardType = offender.yellowCards >= 2 ? 'red' : 'yellow';
       }
@@ -1085,6 +1192,49 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       if (finishedRef.current) return;
       finishedRef.current = true;
       g.state = 'ENDED';
+      if (isOnlineHost && config.onlineBridge?.sendState) {
+        config.onlineBridge.sendState({
+          state: 'ENDED',
+          elapsed: g.elapsed,
+          homeScore: g.homeScore,
+          awayScore: g.awayScore,
+          camX: g.camX,
+          camY: g.camY,
+          bannerText: 'FIM DE JOGO',
+          bannerSub: `${config.homeTeam.abbr} ${g.homeScore} x ${g.awayScore} ${config.awayTeam.abbr}`,
+          bannerTimer: 2,
+          ball: {
+            x: g.ball.x,
+            y: g.ball.y,
+            z: g.ball.z,
+            spin: g.ball.spin,
+            ownerId: g.ball.owner?.id || null
+          },
+          ref: {
+            x: g.ref.x,
+            y: g.ref.y,
+            dirX: g.ref.dirX,
+            frame: g.ref.frame,
+            animTime: g.ref.animTime
+          },
+          activeHomeId: g.activeHome?.id || null,
+          activeAwayId: g.activeAway?.id || null,
+          p1Power: g.p1Power,
+          p2Power: g.p2Power,
+          players: g.players.map((p) => ({
+            id: p.id,
+            x: p.x,
+            y: p.y,
+            dirX: p.dirX,
+            frame: p.frame,
+            animTime: p.animTime,
+            action: p.action,
+            diveDir: p.diveDir,
+            ejected: p.ejected,
+            stamina: p.stamina
+          }))
+        });
+      }
       Narrator.stop();
       AudioFX.playWhistle('fulltime');
       const totalPoss = Math.max(1, g.homePossTime + g.awayPossTime);
@@ -1295,12 +1445,17 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     };
 
     const getP1Move = () => {
-      let ix = 0;
-      let iy = 0;
+      let ix = touchInputRef.current.ix;
+      let iy = touchInputRef.current.iy;
       if (keysHeld.has('KeyA') || (!isTwoPlayer && keysHeld.has('ArrowLeft'))) ix -= 1;
       if (keysHeld.has('KeyD') || (!isTwoPlayer && keysHeld.has('ArrowRight'))) ix += 1;
       if (keysHeld.has('KeyW') || (!isTwoPlayer && keysHeld.has('ArrowUp'))) iy -= 1;
       if (keysHeld.has('KeyS') || (!isTwoPlayer && keysHeld.has('ArrowDown'))) iy += 1;
+      const mag = Math.hypot(ix, iy);
+      if (mag > 1) {
+        ix /= mag;
+        iy /= mag;
+      }
       return { ix, iy };
     };
 
@@ -1341,7 +1496,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       }
 
       const tms = g.players.filter(
-        (p) => !p.ejected && p.side === pl.side && p.slot !== 'GOL' && p !== g.activeHome && (!isTwoPlayer || p !== g.activeAway)
+        (p) => !p.ejected && p.side === pl.side && p.slot !== 'GOL' && p !== g.activeHome && (!hasHumanAway || p !== g.activeAway)
       );
       let closest: PlayerEntity | null = null;
       let bestD = Infinity;
@@ -1355,7 +1510,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       const pressDistBoost = pl.side === 'home' && mentalityRef.current === 'pressao_alta' ? 145 : 105;
       const shouldPress =
-        (pl.side === 'away' && !isTwoPlayer && pl === closest && bestD < diff.pressDist) ||
+        (pl.side === 'away' && !hasHumanAway && pl === closest && bestD < diff.pressDist) ||
         (pl.side === 'home' && !b.owner && pl === closest && bestD < pressDistBoost);
 
       if (shouldPress) {
@@ -1440,7 +1595,34 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         if (isTraining) setupTrainingDrill(trainingModeRef.current);
       }
 
-      if (pausedRef.current || g.state === 'ENDED') return;
+      if ((pausedRef.current && !isOnline) || g.state === 'ENDED') return;
+
+      if (isOnlineGuest) {
+        if (weather === 'rain') {
+          for (const rd of g.rainDrops) {
+            rd.x -= rd.speed * 0.25 * dt;
+            rd.y += rd.speed * dt;
+            if (rd.y > CANVAS_H) {
+              rd.y = -14;
+              rd.x = Math.random() * (CANVAS_W + 120);
+            }
+            if (rd.x < -14) rd.x += CANVAS_W + 60;
+          }
+        }
+        const mv = getP1Move();
+        const t = touchInputRef.current;
+        config.onlineBridge?.sendGuestInput?.({
+          ix: mv.ix,
+          iy: mv.iy,
+          sprint: keysHeld.has('ShiftLeft') || keysHeld.has('ShiftRight') || t.sprintHeld,
+          passJust: keysJust.has('KeyJ') || keysJust.has('KeyX') || t.passJust,
+          shootHeld: keysHeld.has('Space') || keysHeld.has('KeyK') || keysHeld.has('KeyZ') || t.shootHeld,
+          shootJust: keysJust.has('Space') || keysJust.has('KeyK') || keysJust.has('KeyZ') || t.shootJust,
+          shootReleased: p1ShootReleased || t.shootReleased,
+          switchJust: keysJust.has('ShiftLeft') || keysJust.has('ShiftRight') || t.switchJust
+        });
+        return;
+      }
 
       applyFormationAndMentality();
 
@@ -1530,7 +1712,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       if (g.state === 'PRE_MATCH') {
         g.preMatchTimer -= dt;
-        if (skipPreMatchRef.current || g.preMatchTimer <= 0) {
+        if (skipPreMatchRef.current || touchInputRef.current.anyActionJust || g.preMatchTimer <= 0) {
           skipPreMatchRef.current = false;
           setIsPreMatch(false);
           g.state = 'PLAYING';
@@ -1556,9 +1738,10 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           if (sp.kind === 'free_kick') {
             sp.curve = Math.max(-1, Math.min(1, sp.curve + mv.ix * dt * 1.5));
           }
-          const shootHeld = keysHeld.has('KeyK') || keysHeld.has('KeyZ');
-          const shootJust = keysJust.has('KeyK') || keysJust.has('KeyZ');
-          const passJust = keysJust.has('KeyJ');
+          const t = touchInputRef.current;
+          const shootHeld = keysHeld.has('Space') || keysHeld.has('KeyK') || keysHeld.has('KeyZ') || t.shootHeld;
+          const shootJust = keysJust.has('Space') || keysJust.has('KeyK') || keysJust.has('KeyZ') || t.shootJust;
+          const passJust = keysJust.has('KeyJ') || t.passJust;
 
           if (passJust && sp.kind === 'free_kick') {
             g.state = 'PLAYING';
@@ -1570,7 +1753,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             g.p1Power = 0.22;
           }
           if (g.p1Charging && shootHeld) g.p1Power = Math.min(1, g.p1Power + dt * 1.5);
-          if (g.p1Charging && (!shootHeld || p1ShootReleased)) {
+          if (g.p1Charging && (!shootHeld || p1ShootReleased || t.shootReleased)) {
             const pwr = g.p1Power;
             g.p1Charging = false;
             g.p1Power = 0;
@@ -1663,7 +1846,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           g.replayAcc -= 1;
           g.replayIdx++;
         }
-        if (skipReplayRef.current || g.replayIdx >= g.replayFrames.length) {
+        if (skipReplayRef.current || touchInputRef.current.anyActionJust || g.replayIdx >= g.replayFrames.length) {
           setIsReplay(false);
           skipReplayRef.current = false;
           g.replayBuffer = [];
@@ -1698,16 +1881,17 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       if (g.ball.pickupCooldown > 0) g.ball.pickupCooldown -= dt;
 
       const p1Move = getP1Move();
+      const tIn = touchInputRef.current;
       const homeHasBall = g.ball.owner && g.ball.owner.side === 'home';
-      const p1ShiftJust = keysJust.has('ShiftLeft') || keysJust.has('ShiftRight');
-      const p1SprintHeld = keysHeld.has('ShiftLeft') || keysHeld.has('ShiftRight');
-      const p1ShortPass = keysJust.has('KeyJ') || keysJust.has('KeyX');
-      const p1ThroughPass = keysJust.has('KeyH');
-      const p1CrossPass = keysJust.has('KeyL');
-      const p1ShootHeld = keysHeld.has('KeyK') || keysHeld.has('KeyZ');
-      const p1ShootJust = keysJust.has('KeyK') || keysJust.has('KeyZ');
-      const p1SpaceJust = keysJust.has('Space');
-      const p1SpaceHeld = keysHeld.has('Space');
+      const p1ShiftJust = keysJust.has('ShiftLeft') || keysJust.has('ShiftRight') || tIn.switchJust;
+      const p1SprintHeld = keysHeld.has('ShiftLeft') || keysHeld.has('ShiftRight') || tIn.sprintHeld;
+      const p1ShortPass = keysJust.has('KeyJ') || keysJust.has('KeyX') || tIn.passJust;
+      const p1ThroughPass = keysJust.has('KeyH') || tIn.throughJust;
+      const p1CrossPass = keysJust.has('KeyL') || tIn.crossJust;
+      const p1ShootHeld = keysHeld.has('Space') || keysHeld.has('KeyK') || keysHeld.has('KeyZ') || tIn.shootHeld;
+      const p1ShootJust = keysJust.has('Space') || keysJust.has('KeyK') || keysJust.has('KeyZ') || tIn.shootJust;
+      const p1ShieldJust = keysJust.has('KeyC') || keysJust.has('KeyE') || tIn.shieldJust;
+      const p1ShieldHeld = keysHeld.has('KeyC') || keysHeld.has('KeyE') || tIn.shieldHeld;
 
       if (homeHasBall && lockedIdx === undefined) g.activeHome = g.ball.owner;
       const p1 = g.activeHome;
@@ -1717,7 +1901,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       }
 
       if (p1 && g.ball.owner === p1) {
-        if (p1SpaceJust && p1.feintCooldown <= 0) {
+        if (p1ShieldJust && p1.feintCooldown <= 0) {
           const fdirY = p1Move.iy !== 0 ? p1Move.iy : p1.y > 0 ? -1 : 1;
           p1.y = Math.max(-PITCH.halfH + 12, Math.min(PITCH.halfH - 12, p1.y + fdirY * 14));
           p1.x = Math.max(-PITCH.halfW + 12, Math.min(PITCH.halfW - 12, p1.x + p1.dirX * 10));
@@ -1725,7 +1909,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           p1.stamina = Math.max(15, p1.stamina - 6);
           spawnDust(p1.x, p1.y, 4, '#f8fafc');
         }
-        if (p1SpaceHeld) {
+        if (p1ShieldHeld) {
           p1.shieldTimer = 0.14;
         }
 
@@ -1740,7 +1924,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             g.p1Power = 0.16;
           }
           if (g.p1Charging && p1ShootHeld) g.p1Power = Math.min(1, g.p1Power + dt * 1.75);
-          if (g.p1Charging && (!p1ShootHeld || p1ShootReleased)) {
+          if (g.p1Charging && (!p1ShootHeld || p1ShootReleased || tIn.shootReleased)) {
             performShot(p1, g.p1Power, p1Move.iy);
             if (isTraining) {
               g.training.shotLive = true;
@@ -1769,12 +1953,29 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         }
       }
 
-      if (isTwoPlayer) {
-        const p2Move = getP2Move();
-        const p2Switch = keysJust.has('ControlRight') || keysJust.has('Comma');
-        const p2Pass = keysJust.has('KeyN') || keysJust.has('Numpad1');
-        const p2ShootHeld = keysHeld.has('KeyM') || keysHeld.has('Numpad2') || keysHeld.has('Enter');
-        const p2ShootJust = keysJust.has('KeyM') || keysHeld.has('Numpad2') || keysHeld.has('Enter');
+      if (hasHumanAway) {
+        const p2Move = isOnlineHost ? { ix: remoteGuestInput.ix, iy: remoteGuestInput.iy } : getP2Move();
+        const p2Switch = isOnlineHost
+          ? remoteGuestInput.switchJust
+          : keysJust.has('ControlRight') || keysJust.has('Comma');
+        const p2Pass = isOnlineHost
+          ? remoteGuestInput.passJust
+          : keysJust.has('KeyN') || keysJust.has('Numpad1');
+        const p2ShootHeld = isOnlineHost
+          ? remoteGuestInput.shootHeld
+          : keysHeld.has('KeyM') || keysHeld.has('Numpad2') || keysHeld.has('Enter');
+        const p2ShootJust = isOnlineHost
+          ? remoteGuestInput.shootJust
+          : keysJust.has('KeyM') || keysJust.has('Numpad2') || keysJust.has('Enter');
+        const p2Rel = isOnlineHost ? remoteGuestInput.shootReleased : p2ShootReleased;
+
+        if (isOnlineHost) {
+          remoteGuestInput.switchJust = false;
+          remoteGuestInput.passJust = false;
+          remoteGuestInput.shootJust = false;
+          remoteGuestInput.shootReleased = false;
+        }
+
         if (g.ball.owner && g.ball.owner.side === 'away') g.activeAway = g.ball.owner;
         const p2 = g.activeAway;
 
@@ -1791,7 +1992,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               g.p2Power = 0.16;
             }
             if (g.p2Charging && p2ShootHeld) g.p2Power = Math.min(1, g.p2Power + dt * 1.75);
-            if (g.p2Charging && (!p2ShootHeld || p2ShootReleased)) {
+            if (g.p2Charging && (!p2ShootHeld || p2Rel)) {
               performShot(p2, g.p2Power, p2Move.iy);
               g.p2Charging = false;
               g.p2Power = 0;
@@ -1849,9 +2050,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             const victim = g.ball.owner;
             if (Math.hypot(pl.x - victim.x, pl.y - victim.y) < 20) {
               const dotDir = pl.dirX * victim.dirX + pl.dirY * victim.dirY;
-              const fromBehind = dotDir > 0.35 && (pl.x - victim.x) * victim.dirX < -4;
+              const fromBehind = dotDir > 0.6 && (pl.x - victim.x) * victim.dirX < -8;
               const distToBall = Math.hypot(pl.x - g.ball.x, pl.y - g.ball.y);
-              if (fromBehind || (distToBall > 14 && Math.random() < 0.42)) {
+              if ((fromBehind && Math.random() < 0.25) || (distToBall > 22 && Math.random() < 0.08)) {
                 callFoul(pl, victim, fromBehind);
                 foulTriggered = true;
                 break;
@@ -1865,7 +2066,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 g.userTackles++;
                 if (lockedIdx === undefined) g.activeHome = pl;
                 announce(`Desarme firme de ${pl.data.name}!`);
-              } else if (isTwoPlayer) {
+              } else if (hasHumanAway) {
                 g.activeAway = pl;
               }
               g.hitstop = 0.035;
@@ -1914,11 +2115,15 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             sprinting = true;
           }
           if (pl.shieldTimer > 0) spd *= 0.7;
-        } else if (isTwoPlayer && pl === g.activeAway && pl.slot !== 'GOL') {
-          const m = getP2Move();
+        } else if (hasHumanAway && pl === g.activeAway && pl.slot !== 'GOL') {
+          const m = isOnlineHost ? { ix: remoteGuestInput.ix, iy: remoteGuestInput.iy } : getP2Move();
           mx = m.ix;
           my = m.iy;
           if (g.ball.owner === pl) spd *= 0.96;
+          if (isOnlineHost && remoteGuestInput.sprint && pl.stamina > 12 && (mx !== 0 || my !== 0)) {
+            spd *= 1.28;
+            sprinting = true;
+          }
         } else if (pl.slot === 'GOL') {
           const gkX = pl.side === 'home' ? -PITCH.halfW + 18 : PITCH.halfW - 18;
           const targetY = Math.max(-PITCH.goalHalfW + 8, Math.min(PITCH.goalHalfW - 8, g.ball.y * 0.72));
@@ -2032,7 +2237,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               b.lastTouchPlayer = other;
               if (other.slot === 'GOL') other.aiPassCooldown = 0.55;
               if (other.side === 'home' && other.slot !== 'GOL' && lockedIdx === undefined) g.activeHome = other;
-              if (other.side === 'away' && other.slot !== 'GOL' && isTwoPlayer) g.activeAway = other;
+              if (other.side === 'away' && other.slot !== 'GOL' && hasHumanAway) g.activeAway = other;
               AudioFX.playKick(0.2);
               break;
             }
@@ -2150,7 +2355,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 b.pickupCooldown = 0.14;
                 if (pl.slot === 'GOL') pl.aiPassCooldown = 0.45;
                 if (pl.side === 'home' && pl.slot !== 'GOL' && lockedIdx === undefined) g.activeHome = pl;
-                if (pl.side === 'away' && pl.slot !== 'GOL' && isTwoPlayer) g.activeAway = pl;
+                if (pl.side === 'away' && pl.slot !== 'GOL' && hasHumanAway) g.activeAway = pl;
               }
               break;
             }
@@ -2297,14 +2502,14 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         );
       }
 
-      // Outer Stadium Apron Base
-      const outerBg = weather === 'night' ? '#081b14' : weather === 'rain' ? '#0f2d21' : '#164e36';
+      // Outer Stadium Apron Base (Vibrant Colored Turf & Stadium Surround)
+      const outerBg = weather === 'night' ? '#0b291d' : weather === 'rain' ? '#133d2c' : '#196946';
       ctx.fillStyle = outerBg;
       ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-      // Vibrant Pixel Cup Soccer Mown Turf Stripes
-      const turfA = weather === 'night' ? '#1f6a47' : weather === 'rain' ? '#257b52' : '#2d9a67';
-      const turfB = weather === 'night' ? '#267e55' : weather === 'rain' ? '#2c8c5e' : '#36ac75';
+      // Vivid Colorful Pixel Turf Stripes
+      const turfA = weather === 'night' ? '#167a4d' : weather === 'rain' ? '#168866' : '#199e63';
+      const turfB = weather === 'night' ? '#1f925d' : weather === 'rain' ? '#1ca179' : '#22b573';
 
       const numStripes = 16;
       const fullW = PITCH.halfW * 2 + 120;
@@ -2346,14 +2551,15 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           [PITCH.halfW + 180, -PITCH.halfH - 44],
           [-PITCH.halfW - 180, -PITCH.halfH - 44]
         ],
-        weather === 'night' ? '#090f1d' : '#162032'
+        weather === 'night' ? '#0f172a' : '#1e293b'
       );
 
       // Pixel Concourse Dividers
-      drawProjectedLine(-PITCH.halfW - 160, -PITCH.halfH - 118, 0, PITCH.halfW + 160, -PITCH.halfH - 118, 0, '#475569', 2);
-      drawProjectedLine(-PITCH.halfW - 160, -PITCH.halfH - 45, 0, PITCH.halfW + 160, -PITCH.halfH - 45, 0, '#64748b', 2);
+      drawProjectedLine(-PITCH.halfW - 160, -PITCH.halfH - 118, 0, PITCH.halfW + 160, -PITCH.halfH - 118, 0, '#38bdf8', 2);
+      drawProjectedLine(-PITCH.halfW - 160, -PITCH.halfH - 45, 0, PITCH.halfW + 160, -PITCH.halfH - 45, 0, '#facc15', 2);
 
-      // Animated Jumping Pixel Spectators in Club Colors
+      // Animated Jumping Pixel Spectators with Colorful Scarves & Flags
+      const scarfAccents = [config.homeTeam.kit.c1, config.homeTeam.kit.c2, config.awayTeam.kit.c1, '#facc15', '#22d3ee'];
       for (let row = 0; row < 4; row++) {
         const sy = -PITCH.halfH - 64 - row * 24 - (row >= 2 ? 12 : 0);
         for (let sx = -540; sx <= 540; sx += 18) {
@@ -2378,20 +2584,31 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             ctx.fillRect(sp.x - Math.floor(fw / 2) - 2, sp.y - fh - 3, 2, 3);
             ctx.fillRect(sp.x + Math.floor(fw / 2) + 1, sp.y - fh - 3, 2, 3);
           }
+          // Colorful waving mini-flags in stands
+          if (Math.abs(sx + row * 17) % 90 < 18) {
+            const wave = Math.round(Math.sin(nowSec * 6 + sx) * 1.5);
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(sp.x + 3, sp.y - fh - 8, 1, 7);
+            ctx.fillStyle = scarfAccents[Math.abs(sx + row) % scarfAccents.length];
+            ctx.fillRect(sp.x + 4, sp.y - fh - 8 + wave, 5, 3);
+          }
         }
       }
 
-      // Pixel LED Advertising Boards
+      // Vibrant Multi-Color Pixel LED Advertising Boards
+      const ledBgCols = ['#047857', '#1d4ed8', '#be123c', '#7e22ce', '#0f766e'];
+      const ledTrimCols = ['#4ade80', '#22d3ee', '#facc15', '#ec4899', '#38bdf8'];
       for (let bx = -470; bx < 470; bx += 117) {
         const idx = Math.floor((bx + 470) / 117);
         const pL = worldToScreen(bx, -PITCH.halfH - 22, 0, camOverride);
         const pR = worldToScreen(bx + 114, -PITCH.halfH - 22, 0, camOverride);
         const boardH = Math.max(6, Math.round(9 * pL.scale));
         const bw = Math.max(10, pR.x - pL.x);
-        ctx.fillStyle = idx % 3 === 0 ? '#064e3b' : idx % 3 === 1 ? '#1e3a8a' : '#7f1d1d';
+        ctx.fillStyle = ledBgCols[idx % ledBgCols.length];
         ctx.fillRect(pL.x, pL.y - boardH, bw, boardH);
-        ctx.fillStyle = '#111827';
+        ctx.fillStyle = ledTrimCols[(idx + Math.floor(nowSec)) % ledTrimCols.length];
         ctx.fillRect(pL.x, pL.y - boardH, bw, 1);
+        ctx.fillStyle = '#111827';
         ctx.fillRect(pL.x, pL.y - 1, bw, 1);
 
         const midX = Math.round((pL.x + pR.x) * 0.5);
@@ -2399,7 +2616,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           ctx.font = `700 ${Math.max(5, Math.round(5.5 * pL.scale))}px Silkscreen, monospace`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = idx % 2 === 0 ? '#fde047' : '#f8fafc';
+          ctx.fillStyle = idx % 2 === 0 ? '#fde047' : '#ffffff';
           ctx.fillText(LED_ADS[idx % LED_ADS.length], midX, pL.y - Math.floor(boardH * 0.45), bw - 4);
           ctx.textAlign = 'left';
           ctx.textBaseline = 'alphabetic';
@@ -2594,6 +2811,18 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         const ps = worldToScreen((PITCH.halfW - 82) * side, 0, 0, camOverride);
         plotPixelLine(ps.x - 2, ps.y - 2, ps.x + 2, ps.y + 2, lineCol, 1);
         plotPixelLine(ps.x - 2, ps.y + 2, ps.x + 2, ps.y - 2, lineCol, 1);
+
+        // Colorful Corner Flags in Club Colors
+        [-1, 1].forEach((cySign) => {
+          const cf = worldToScreen(gx, PITCH.halfH * cySign, 0, camOverride);
+          const flutter = Math.round(Math.sin(nowSec * 6 + side + cySign) * 1.5);
+          ctx.fillStyle = '#f8fafc';
+          ctx.fillRect(cf.x, cf.y - 12, 1, 12);
+          ctx.fillStyle = side < 0 ? config.homeTeam.kit.c1 : config.awayTeam.kit.c1;
+          ctx.fillRect(cf.x + 1, cf.y - 12 + flutter, 6, 4);
+          ctx.fillStyle = side < 0 ? config.homeTeam.kit.c2 : config.awayTeam.kit.c2;
+          ctx.fillRect(cf.x + 1, cf.y - 10 + flutter, 6, 2);
+        });
       });
 
       // Set Piece Aiming & Curve Guide
@@ -2764,8 +2993,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             const py = pos.y;
             const sc = 0.92 * pos.scale;
 
-            const isP1 = pl === g.activeHome;
-            const isP2 = isTwoPlayer && pl === g.activeAway;
+            const isP1 = !isOnlineGuest && pl === g.activeHome;
+            const isP2 = (isTwoPlayer || isOnlineHost || isOnlineGuest) && pl === g.activeAway;
             const isCarrier = snap ? snap.ball.ownerId === pl.id : g.ball.owner === pl;
 
             // Iconic Pixel Cup Soccer 4-Arc Segmented Selector Ring
@@ -2960,6 +3189,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
     let lastTime = performance.now();
     let hudSyncAcc = 0;
+    let stateSyncAcc = 0;
     let rafId = 0;
 
     const loop = (now: number) => {
@@ -2969,11 +3199,59 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       updateSim(rawDt);
       renderScene();
 
+      if (isOnlineHost && config.onlineBridge?.sendState) {
+        stateSyncAcc += rawDt;
+        if (stateSyncAcc >= 0.033) {
+          stateSyncAcc = 0;
+          config.onlineBridge.sendState({
+            state: g.state,
+            elapsed: g.elapsed,
+            homeScore: g.homeScore,
+            awayScore: g.awayScore,
+            camX: g.camX,
+            camY: g.camY,
+            bannerText: g.bannerText,
+            bannerSub: g.bannerSub,
+            bannerTimer: g.bannerTimer,
+            ball: {
+              x: g.ball.x,
+              y: g.ball.y,
+              z: g.ball.z,
+              spin: g.ball.spin,
+              ownerId: g.ball.owner?.id || null
+            },
+            ref: {
+              x: g.ref.x,
+              y: g.ref.y,
+              dirX: g.ref.dirX,
+              frame: g.ref.frame,
+              animTime: g.ref.animTime
+            },
+            activeHomeId: g.activeHome?.id || null,
+            activeAwayId: g.activeAway?.id || null,
+            p1Power: g.p1Power,
+            p2Power: g.p2Power,
+            players: g.players.map((p) => ({
+              id: p.id,
+              x: p.x,
+              y: p.y,
+              dirX: p.dirX,
+              frame: p.frame,
+              animTime: p.animTime,
+              action: p.action,
+              diveDir: p.diveDir,
+              ejected: p.ejected,
+              stamina: p.stamina
+            }))
+          });
+        }
+      }
+
       hudSyncAcc += rawDt;
       if (hudSyncAcc > 0.08) {
         hudSyncAcc = 0;
         const p1 = g.activeHome;
-        const p2 = isTwoPlayer ? g.activeAway : g.ball.owner?.side === 'away' ? g.ball.owner : g.activeAway;
+        const p2 = hasHumanAway || isOnlineGuest ? g.activeAway : g.ball.owner?.side === 'away' ? g.ball.owner : g.activeAway;
         const matchSec = Math.min(5400, Math.floor((g.elapsed / matchDuration) * 5400));
         const mm = String(Math.floor(matchSec / 60)).padStart(2, '0');
         const ss = String(matchSec % 60).padStart(2, '0');
@@ -2983,10 +3261,10 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           if (g.setPiece.side === 'home') {
             hint =
               g.setPiece.kind === 'penalty'
-                ? 'PÊNALTI: W/S Escolher Canto · Segure K para Chutar!'
-                : 'FALTA: W/S Mira · A/D Curva · Segure K Chuta · J Toca';
+                ? 'PÊNALTI: Mire (Analógico / W/S) · Segure Chute (Espaço/K)!'
+                : 'FALTA: Mire · Curva (Esq/Dir) · Segure Chute (Espaço/K) · Passe';
           } else if (g.setPiece.kind === 'penalty') {
-            hint = 'DEFENDA O PÊNALTI: W (Cima) ou S (Baixo) para pular no canto!';
+            hint = 'DEFENDA O PÊNALTI: Cima ou Baixo para pular no canto!';
           }
         }
 
@@ -2999,6 +3277,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           p1Role: p1 ? p1.data.role : 'ATA',
           p1Power: Math.round(g.p1Power * 100),
           p1Stamina: Math.round(p1 ? p1.stamina : 100),
+          p1HasBall: Boolean(g.ball.owner && g.ball.owner.side === 'home'),
+          inSetPiece: g.state === 'SET_PIECE',
           p2Name: p2 ? p2.data.name : config.awayTeam.abbr,
           p2Num: p2 ? p2.data.num : 9,
           p2Role: p2 ? p2.data.role : 'ATA',
@@ -3036,6 +3316,15 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       keysJust.clear();
       p1ShootReleased = false;
       p2ShootReleased = false;
+      const tClear = touchInputRef.current;
+      tClear.passJust = false;
+      tClear.throughJust = false;
+      tClear.crossJust = false;
+      tClear.shootJust = false;
+      tClear.shootReleased = false;
+      tClear.switchJust = false;
+      tClear.shieldJust = false;
+      tClear.anyActionJust = false;
       rafId = requestAnimationFrame(loop);
     };
 
@@ -3043,6 +3332,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
     return () => {
       cancelAnimationFrame(rafId);
+      unsubGuestInput();
+      unsubRemoteState();
       Narrator.stop();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
@@ -3057,7 +3348,10 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
   };
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-[#07130d] overflow-hidden">
+    <div
+      ref={containerRef}
+      className="relative w-full h-full flex items-center justify-center bg-[#07130d] overflow-hidden touch-game-area"
+    >
       <canvas
         ref={canvasRef}
         width={CANVAS_W}
@@ -3066,11 +3360,11 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       />
 
       {/* Pixel Cup Soccer Inspired Broadcast HUD Overlay */}
-      <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-2.5 sm:p-4 z-10">
+      <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-2 sm:p-4 z-10">
         <div className="relative flex items-start justify-between gap-2">
           {/* Top-Left Commentary & Training Controls */}
-          <div className="flex flex-col items-start gap-1.5 mt-14 lg:mt-0 max-w-[230px] xl:max-w-[290px]">
-            <div className="bg-slate-950/88 border-2 border-slate-900 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-amber-200 shadow-lg truncate max-w-full">
+          <div className="flex flex-col items-start gap-1.5 mt-12 sm:mt-14 lg:mt-0 max-w-[170px] sm:max-w-[230px] xl:max-w-[290px]">
+            <div className="bg-slate-950/88 border-2 border-slate-900 rounded-lg px-2 py-1 text-[10px] sm:text-[11px] font-semibold text-amber-200 shadow-lg truncate max-w-full">
               {commentary}
             </div>
 
@@ -3175,9 +3469,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           </div>
 
           {/* Top-Right TV Watermark & Controls */}
-          <div className="flex flex-wrap items-center justify-end gap-1.5 pointer-events-auto mt-14 lg:mt-0">
+          <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-1.5 pointer-events-auto mt-12 sm:mt-14 lg:mt-0">
             {isReplay ? (
-              <div className="flex items-center gap-2 bg-rose-600/95 border-2 border-white/40 rounded-lg px-2.5 py-1 text-[11px] font-pixel text-white shadow-lg">
+              <div className="flex items-center gap-2 bg-rose-600/95 border-2 border-white/40 rounded-lg px-2 py-1 text-[10px] sm:text-[11px] font-pixel text-white shadow-lg">
                 <span>BRFC ● REPLAY</span>
               </div>
             ) : (
@@ -3191,24 +3485,42 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 onClick={() => {
                   skipReplayRef.current = true;
                 }}
-                className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-950 bg-amber-400 text-[11px] font-extrabold text-slate-950 cursor-pointer shadow"
+                className="min-h-[34px] px-2.5 rounded-lg border-2 border-slate-950 bg-amber-400 text-[11px] font-extrabold text-slate-950 cursor-pointer shadow"
               >
-                Pular Replay
+                Pular
               </button>
             )}
             <button
               type="button"
+              onClick={() => setShowTouchControls((v) => !v)}
+              className={`min-h-[32px] px-2 rounded-lg border-2 text-[10px] sm:text-[11px] font-bold cursor-pointer ${
+                showTouchControls
+                  ? 'border-cyan-400 bg-cyan-500/25 text-cyan-200'
+                  : 'border-slate-900 bg-slate-950/90 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              {showTouchControls ? 'Touch: ON' : 'Touch: OFF'}
+            </button>
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="min-h-[32px] px-2 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[10px] sm:text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer hidden sm:inline-flex items-center"
+            >
+              {isFullscreen ? 'Janela' : 'Tela Cheia'}
+            </button>
+            <button
+              type="button"
               onClick={() => setVoiceOn(Narrator.setVoiceEnabled(!Narrator.isVoiceEnabled()))}
-              className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
+              className="min-h-[32px] px-2 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[10px] sm:text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer hidden md:inline-flex items-center"
             >
               {voiceOn ? 'Voz: ON' : 'Voz: OFF'}
             </button>
             <button
               type="button"
               onClick={() => setMuted(AudioFX.setMuted(!AudioFX.isMuted()))}
-              className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
+              className="min-h-[32px] px-2 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[10px] sm:text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
             >
-              {muted ? 'Som: OFF' : 'Som: ON'}
+              {muted ? 'Mudo' : 'Som'}
             </button>
             <button
               type="button"
@@ -3216,18 +3528,26 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 setPauseTab('menu');
                 setPaused((p) => !p);
               }}
-              className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
+              className="min-h-[32px] px-2.5 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[10px] sm:text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
             >
               Pausa
             </button>
           </div>
         </div>
 
-        {/* Bottom Pixel Cup Soccer Strip: P1 Gauges | Pixel Radar | P2 Gauges */}
-        <div className="flex items-end justify-between gap-2 sm:gap-4">
-          <div className="flex flex-col gap-1 bg-slate-950/80 border-2 border-slate-900 rounded-lg px-2.5 py-1.5 shadow-xl">
+        {/* Bottom Pixel Cup Soccer Strip: Responsive for Mobile Touch & Desktop */}
+        <div
+          className={`flex items-end gap-2 sm:gap-4 ${
+            showTouchControls ? 'justify-center pb-1 sm:pb-0' : 'justify-between'
+          }`}
+        >
+          <div
+            className={`${
+              showTouchControls ? 'hidden lg:flex' : 'flex'
+            } flex-col gap-1 bg-slate-950/80 border-2 border-slate-900 rounded-lg px-2 py-1 sm:px-2.5 sm:py-1.5 shadow-xl`}
+          >
             <div className="flex items-center gap-1.5">
-              <div className="grid grid-cols-8 gap-0.5 w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+              <div className="grid grid-cols-8 gap-0.5 w-16 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
                 {Array.from({ length: 8 }).map((_, idx) => {
                   const active = hudState.p1Power >= (idx + 1) * 12.5;
                   return (
@@ -3246,30 +3566,53 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                   );
                 })}
               </div>
-              <span className="font-pixel text-[9px] text-amber-300">CHUTE</span>
+              <span className="font-pixel text-[8px] sm:text-[9px] text-amber-300">CHUTE</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+              <div className="w-16 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
                 <div className="h-full bg-cyan-400 transition-all duration-75" style={{ width: `${hudState.p1Stamina}%` }} />
               </div>
-              <span className="font-pixel text-[9px] text-cyan-300">FÔLEGO</span>
+              <span className="font-pixel text-[8px] sm:text-[9px] text-cyan-300">FÔLEGO</span>
             </div>
-            <div className="font-pixel text-[10px] sm:text-xs text-white tracking-wide drop-shadow-[0_1px_0_#000] tabular-nums">
+            <div className="font-pixel text-[9px] sm:text-xs text-white tracking-wide drop-shadow-[0_1px_0_#000] tabular-nums truncate max-w-[125px] sm:max-w-none">
               {hudState.p1Num}. {hudState.p1Name.toUpperCase()} <span className="text-cyan-300">.{hudState.p1Role.slice(0, 2)}</span>
             </div>
           </div>
 
-          <canvas
-            ref={radarRef}
-            width={160}
-            height={76}
-            className="pixelated w-[148px] h-[70px] sm:w-[196px] sm:h-[92px] border-2 border-white/65 rounded bg-emerald-900 shadow-2xl"
-          />
+          <div className="flex flex-col items-center gap-1">
+            {showTouchControls && (
+              <div className="lg:hidden flex items-center gap-2 bg-slate-950/80 border border-slate-800 rounded-md px-2 py-0.5 text-[9px] font-pixel text-white tabular-nums">
+                <span className="text-cyan-300 truncate max-w-[78px]">{hudState.p1Name}</span>
+                <div className="w-12 h-2 bg-slate-900 border border-slate-950">
+                  <div
+                    className={`h-full transition-all duration-75 ${
+                      hudState.p1Power > 65 ? 'bg-rose-500' : hudState.p1Power > 10 ? 'bg-amber-400' : 'bg-cyan-400'
+                    }`}
+                    style={{ width: `${hudState.p1Power > 0 ? hudState.p1Power : hudState.p1Stamina}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            <canvas
+              ref={radarRef}
+              width={160}
+              height={76}
+              className={`pixelated border-2 border-white/65 rounded bg-emerald-900 shadow-2xl ${
+                showTouchControls
+                  ? 'w-[94px] h-[44px] sm:w-[144px] sm:h-[68px] lg:w-[196px] lg:h-[92px]'
+                  : 'w-[116px] h-[55px] sm:w-[196px] sm:h-[92px]'
+              }`}
+            />
+          </div>
 
-          <div className="flex flex-col items-end gap-1 bg-slate-950/80 border-2 border-slate-900 rounded-lg px-2.5 py-1.5 shadow-xl">
+          <div
+            className={`${
+              showTouchControls ? 'hidden lg:flex' : 'flex'
+            } flex-col items-end gap-1 bg-slate-950/80 border-2 border-slate-900 rounded-lg px-2 py-1 sm:px-2.5 sm:py-1.5 shadow-xl`}
+          >
             <div className="flex items-center gap-1.5">
-              <span className="font-pixel text-[9px] text-amber-300">CHUTE</span>
-              <div className="grid grid-cols-8 gap-0.5 w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+              <span className="font-pixel text-[8px] sm:text-[9px] text-amber-300">CHUTE</span>
+              <div className="grid grid-cols-8 gap-0.5 w-16 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
                 {Array.from({ length: 8 }).map((_, idx) => {
                   const active = hudState.p2Power >= (idx + 1) * 12.5;
                   return (
@@ -3290,30 +3633,47 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="font-pixel text-[9px] text-rose-300">FÔLEGO</span>
-              <div className="w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+              <span className="font-pixel text-[8px] sm:text-[9px] text-rose-300">FÔLEGO</span>
+              <div className="w-16 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
                 <div className="h-full bg-rose-400 transition-all duration-75" style={{ width: `${hudState.p2Stamina}%` }} />
               </div>
             </div>
-            <div className="font-pixel text-[10px] sm:text-xs text-white tracking-wide drop-shadow-[0_1px_0_#000] tabular-nums">
+            <div className="font-pixel text-[9px] sm:text-xs text-white tracking-wide drop-shadow-[0_1px_0_#000] tabular-nums truncate max-w-[125px] sm:max-w-none">
               {hudState.p2Num}. {hudState.p2Name.toUpperCase()} <span className="text-rose-300">.{hudState.p2Role.slice(0, 2)}</span>
             </div>
           </div>
         </div>
       </div>
 
+      {/* Virtual Touch Gamepad for Mobile / Tablet */}
+      {showTouchControls && !paused && !isPreMatch && !isReplay && (
+        <MobileControls
+          touchRef={touchInputRef}
+          hasBall={hudState.p1HasBall}
+          isSetPiece={hudState.inSetPiece}
+        />
+      )}
+
       {/* Broadcast Pre-Match Lineup Presentation Overlay */}
       {isPreMatch && (
-        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm z-20 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-slate-950/95 border border-amber-400/35 rounded-2xl p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+        <div
+          onClick={() => {
+            skipPreMatchRef.current = true;
+          }}
+          className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm z-20 flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl bg-slate-950/95 border border-amber-400/35 rounded-2xl p-4 sm:p-6 space-y-3 sm:space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
               <span className="font-display text-xs font-extrabold uppercase tracking-wider text-amber-400">
                 BRFC · Escalações Confirmadas
               </span>
               <span className="text-xs font-semibold text-slate-300">{WEATHER_LABELS[weather]}</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="bg-slate-900/90 border border-white/10 rounded-xl p-3.5 space-y-2.5">
                 <div className="flex items-center gap-2.5 border-b border-white/10 pb-2">
                   <ClubCrest team={config.homeTeam} className="w-7 h-7" />
@@ -3355,14 +3715,14 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-              <span>Pressione Espaço ou K para dar a saída</span>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 pt-1">
+              <span>Toque na tela ou pressione Espaço/K para dar a saída</span>
               <button
                 type="button"
                 onClick={() => {
                   skipPreMatchRef.current = true;
                 }}
-                className="min-h-[38px] px-5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-extrabold text-white cursor-pointer"
+                className="w-full sm:w-auto min-h-[44px] px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-extrabold text-white cursor-pointer"
               >
                 Iniciar Partida →
               </button>
@@ -3403,22 +3763,41 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
             {pauseTab === 'menu' ? (
               <div className="space-y-4 text-left">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowTouchControls((v) => !v)}
+                    className={`min-h-[44px] px-4 rounded-xl border text-xs font-bold cursor-pointer ${
+                      showTouchControls
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                        : 'bg-slate-900 border-white/15 text-slate-300'
+                    }`}
+                  >
+                    Controles Touch na Tela: {showTouchControls ? 'Ligado' : 'Desligado'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleFullscreen}
+                    className="min-h-[44px] px-4 rounded-xl border border-white/15 bg-slate-900 text-xs font-bold text-slate-200 cursor-pointer"
+                  >
+                    {isFullscreen ? 'Sair da Tela Cheia' : 'Modo Tela Cheia'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVoiceOn(Narrator.setVoiceEnabled(!Narrator.isVoiceEnabled()))}
+                    className="min-h-[44px] px-4 rounded-xl border border-white/15 bg-slate-900 text-xs font-bold text-slate-200 cursor-pointer"
+                  >
+                    Narração: {voiceOn ? 'Ligada' : 'Desligada'}
+                  </button>
+                </div>
+
                 <div className="bg-slate-900/80 border border-white/10 rounded-xl p-4 space-y-2 text-xs text-slate-300">
                   <div className="font-display font-extrabold text-white uppercase mb-1">Comandos da Partida</div>
                   <div>
-                    <strong className="text-amber-400">WASD / Setas:</strong> Movimentar jogador
+                    <strong className="text-cyan-300">Mobile (Touch):</strong> Analógico esquerdo para mover/correr · Botões à direita para Chute, Passe, Enfiada, Cruzamento e Cortar
                   </div>
                   <div>
-                    <strong className="text-amber-400">Shift:</strong> Trocar marcador (sem posse) / Sprint (segurar correndo)
-                  </div>
-                  <div>
-                    <strong className="text-amber-400">J:</strong> Passe rasteiro curto · <strong className="text-amber-400">H:</strong> Passe em profundidade (enfiada)
-                  </div>
-                  <div>
-                    <strong className="text-amber-400">L:</strong> Cruzamento / Lançamento alto · <strong className="text-amber-400">Espaço:</strong> Proteger bola / Corte de corpo
-                  </div>
-                  <div>
-                    <strong className="text-amber-400">K:</strong> Chute colocado/potente (segure) · Carrinho (sem posse) · Voleio (bola no ar)
+                    <strong className="text-amber-400">Teclado:</strong> WASD/Setas Mover · Shift Trocar/Sprint · J Passe · H Enfiada · L Cruzamento · C/E Cortar · Espaço/K Chute/Carrinho
                   </div>
                 </div>
               </div>

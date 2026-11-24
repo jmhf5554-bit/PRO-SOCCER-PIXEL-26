@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChampionshipTrophy, ClubCrest, PlayerSpritePreview } from '../components/ClubPreview';
-import { DIFFICULTIES, TEAMS, getTeamBench, isKitClash } from '../data/leagues';
+import { DIFFICULTIES, LEAGUES, TEAMS, getTeamBench, isKitClash } from '../data/leagues';
 import {
   DifficultyId,
   FormationId,
@@ -33,6 +33,7 @@ interface FixtureEntry {
 }
 
 interface ManagerSave {
+  leagueId?: string;
   teamId: string;
   difficulty: DifficultyId;
   round: number;
@@ -49,6 +50,7 @@ interface ManagerSave {
 }
 
 interface PlayerSave {
+  leagueId?: string;
   clubId: string;
   difficulty: DifficultyId;
   round: number;
@@ -135,7 +137,7 @@ interface Props {
 }
 
 export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onStartMatch, onBack }) => {
-  const brasileiraoClubs = useMemo(() => TEAMS.filter((t) => t.leagueId === 'brasileirao'), []);
+  const clubLeagues = useMemo(() => LEAGUES.filter((l) => !l.isNational), []);
   const transferClubs = useMemo(() => TEAMS.filter((t) => t.leagueId !== 'selecoes'), []);
 
   const [careerKind, setCareerKind] = useState<'select' | 'manager' | 'player'>('select');
@@ -157,8 +159,10 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
   });
 
   // Setup & Hub State
+  const [setupLeagueId, setSetupLeagueId] = useState<string>('brasileirao');
   const [setupClubId, setSetupClubId] = useState<string>('flamengo');
   const [setupDiff, setSetupDiff] = useState<DifficultyId>(defaultDifficulty);
+  const setupLeagueClubs = useMemo(() => TEAMS.filter((t) => t.leagueId === setupLeagueId), [setupLeagueId]);
   const [hubTab, setHubTab] = useState<'hub' | 'squad' | 'market' | 'table'>('hub');
   const [statusNote, setStatusNote] = useState<string>('');
   const [swapStarterIdx, setSwapStarterIdx] = useState<number | null>(null);
@@ -189,8 +193,9 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
   }, [playerSave]);
 
   const startManagerCareer = () => {
-    const club = brasileiraoClubs.find((t) => t.id === setupClubId) || brasileiraoClubs[0];
+    const club = setupLeagueClubs.find((t) => t.id === setupClubId) || setupLeagueClubs[0];
     const save: ManagerSave = {
+      leagueId: setupLeagueId,
       teamId: club.id,
       difficulty: setupDiff,
       round: 0,
@@ -201,8 +206,8 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
       formation: '4-3-3',
       squad: club.players.map((p) => toCareerPlayer(p, 8)),
       bench: getTeamBench(club).map((p) => toCareerPlayer(p, 4)),
-      points: initTable(brasileiraoClubs),
-      schedule: buildLeagueSchedule(brasileiraoClubs),
+      points: initTable(setupLeagueClubs),
+      schedule: buildLeagueSchedule(setupLeagueClubs),
       scorers: {}
     };
     setManagerSave(save);
@@ -212,7 +217,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
   };
 
   const startPlayerCareer = () => {
-    const club = brasileiraoClubs.find((t) => t.id === setupClubId) || brasileiraoClubs[0];
+    const club = setupLeagueClubs.find((t) => t.id === setupClubId) || setupLeagueClubs[0];
     const custom: PlayerSpec = {
       num: pNum,
       name: pName.trim() || 'Craque',
@@ -228,6 +233,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
       dribbling: 76
     };
     const save: PlayerSave = {
+      leagueId: setupLeagueId,
       clubId: club.id,
       difficulty: setupDiff,
       round: 0,
@@ -239,8 +245,8 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
       ratings: [],
       tactic: 'equilibrado',
       custom,
-      points: initTable(brasileiraoClubs),
-      schedule: buildLeagueSchedule(brasileiraoClubs)
+      points: initTable(setupLeagueClubs),
+      schedule: buildLeagueSchedule(setupLeagueClubs)
     };
     setPlayerSave(save);
     setCareerKind('player');
@@ -249,6 +255,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
   };
 
   const advanceRoundTable = (
+    leagueClubs: TeamSpec[],
     pts: ManagerSave['points'],
     schedule: FixtureEntry[][],
     round: number,
@@ -271,39 +278,41 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
               hg = userIsHome ? userHomeGoals : userAwayGoals;
               ag = userIsHome ? userAwayGoals : userHomeGoals;
             } else {
-              const th = brasileiraoClubs.find((t) => t.id === fx.homeId)!;
-              const ta = brasileiraoClubs.find((t) => t.id === fx.awayId)!;
+              const th = leagueClubs.find((t) => t.id === fx.homeId) || leagueClubs[0];
+              const ta = leagueClubs.find((t) => t.id === fx.awayId) || leagueClubs[1] || leagueClubs[0];
               const diff = (th.ovr - ta.ovr) * 0.04;
               hg = Math.max(0, Math.round(Math.random() * 2.3 + diff));
               ag = Math.max(0, Math.round(Math.random() * 2.0 - diff));
             }
             const rh = nextPts[fx.homeId];
             const ra = nextPts[fx.awayId];
-            rh.j++;
-            ra.j++;
-            rh.gp += hg;
-            rh.gc += ag;
-            ra.gp += ag;
-            ra.gc += hg;
-            if (hg > ag) {
-              rh.v++;
-              rh.p += 3;
-              ra.d++;
-            } else if (ag > hg) {
-              ra.v++;
-              ra.p += 3;
-              rh.d++;
-            } else {
-              rh.e++;
-              ra.e++;
-              rh.p++;
-              ra.p++;
+            if (rh && ra) {
+              rh.j++;
+              ra.j++;
+              rh.gp += hg;
+              rh.gc += ag;
+              ra.gp += ag;
+              ra.gc += hg;
+              if (hg > ag) {
+                rh.v++;
+                rh.p += 3;
+                ra.d++;
+              } else if (ag > hg) {
+                ra.v++;
+                ra.p += 3;
+                rh.d++;
+              } else {
+                rh.e++;
+                ra.e++;
+                rh.p++;
+                ra.p++;
+              }
             }
 
             // Record Artilharia goals
             if (scorers) {
               const addGoal = (clubId: string, count: number, customPool?: CareerPlayer[]) => {
-                const club = brasileiraoClubs.find((t) => t.id === clubId);
+                const club = leagueClubs.find((t) => t.id === clubId);
                 if (!club || count <= 0) return;
                 const pool = customPool && customPool.length ? customPool : club.players;
                 const attackers = pool.filter((p) => p.role === 'ATA' || p.role === 'MEI');
@@ -326,7 +335,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
 
   // ==================== CAREER SELECTOR SCREEN ====================
   if (careerKind === 'select') {
-    const previewClub = brasileiraoClubs.find((t) => t.id === setupClubId) || brasileiraoClubs[0];
+    const previewClub = setupLeagueClubs.find((t) => t.id === setupClubId) || setupLeagueClubs[0];
     const customPreview: PlayerSpec = {
       num: pNum,
       name: pName || 'Craque',
@@ -366,11 +375,12 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
                 className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/80 to-slate-900/90 border border-emerald-500/40 hover:border-amber-400 text-left flex items-center justify-between gap-3 cursor-pointer transition"
               >
                 <div className="flex items-center gap-3">
-                  <ClubCrest team={brasileiraoClubs.find((t) => t.id === managerSave.teamId) || brasileiraoClubs[0]} className="w-9 h-9" />
+                  <ClubCrest team={transferClubs.find((t) => t.id === managerSave.teamId) || transferClubs[0]} className="w-9 h-9" />
                   <div>
                     <div className="text-[11px] font-bold text-emerald-300 uppercase tracking-wider">Continuar Treinador</div>
                     <div className="text-sm font-extrabold text-white mt-0.5">
-                      {brasileiraoClubs.find((t) => t.id === managerSave.teamId)?.name} · T{managerSave.season} · Rodada {Math.min(7, managerSave.round + 1)}/7
+                      {transferClubs.find((t) => t.id === managerSave.teamId)?.name} · T{managerSave.season} · Rodada{' '}
+                      {Math.min(managerSave.schedule.length, managerSave.round + 1)}/{managerSave.schedule.length}
                     </div>
                   </div>
                 </div>
@@ -387,7 +397,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
                 className="p-4 rounded-xl bg-gradient-to-r from-sky-950/80 to-slate-900/90 border border-sky-500/40 hover:border-amber-400 text-left flex items-center justify-between gap-3 cursor-pointer transition"
               >
                 <div className="flex items-center gap-3">
-                  <ClubCrest team={transferClubs.find((t) => t.id === playerSave.clubId) || brasileiraoClubs[0]} className="w-9 h-9" />
+                  <ClubCrest team={transferClubs.find((t) => t.id === playerSave.clubId) || transferClubs[0]} className="w-9 h-9" />
                   <div>
                     <div className="text-[11px] font-bold text-sky-300 uppercase tracking-wider">Continuar Jogador</div>
                     <div className="text-sm font-extrabold text-white mt-0.5">
@@ -404,9 +414,25 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Shared Club & Difficulty Setup */}
           <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-4">
-            <div className="text-xs font-extrabold uppercase tracking-wider text-slate-300">1. Clube Inicial & Dificuldade</div>
-            <div className="grid grid-cols-2 gap-2">
-              {brasileiraoClubs.map((c) => (
+            <div className="text-xs font-extrabold uppercase tracking-wider text-slate-300">1. Liga, Clube Inicial &amp; Dificuldade</div>
+            <select
+              value={setupLeagueId}
+              onChange={(e) => {
+                const nl = e.target.value;
+                setSetupLeagueId(nl);
+                const first = TEAMS.find((t) => t.leagueId === nl);
+                if (first) setSetupClubId(first.id);
+              }}
+              className="w-full bg-slate-950 border border-white/15 rounded-lg px-3 py-2 text-xs font-bold text-white"
+            >
+              {clubLeagues.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+            <div className="grid grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+              {setupLeagueClubs.map((c) => (
                 <button
                   key={c.id}
                   type="button"
@@ -528,7 +554,10 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
 
   // ==================== MANAGER CAREER HUB ====================
   if (careerKind === 'manager' && managerSave) {
-    const club = brasileiraoClubs.find((t) => t.id === managerSave.teamId) || brasileiraoClubs[0];
+    const club = transferClubs.find((t) => t.id === managerSave.teamId) || transferClubs[0];
+    const mgrLeagueId = managerSave.leagueId || club.leagueId || 'brasileirao';
+    const mgrLeagueClubs = TEAMS.filter((t) => t.leagueId === mgrLeagueId);
+    const mgrLeagueMeta = clubLeagues.find((l) => l.id === mgrLeagueId);
     const customClub: TeamSpec = {
       ...club,
       players: managerSave.squad.map((p) => ({
@@ -542,12 +571,16 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
     const nextFx = !seasonFinished
       ? managerSave.schedule[managerSave.round].find((f) => f.homeId === club.id || f.awayId === club.id)
       : null;
-    const nextOpp = nextFx ? brasileiraoClubs.find((t) => t.id === (nextFx.homeId === club.id ? nextFx.awayId : nextFx.homeId)) : null;
+    const nextOpp = nextFx ? mgrLeagueClubs.find((t) => t.id === (nextFx.homeId === club.id ? nextFx.awayId : nextFx.homeId)) : null;
 
     const sortedTable = Object.entries(managerSave.points)
-      .map(([id, st]) => ({ team: brasileiraoClubs.find((t) => t.id === id)!, ...st }))
+      .map(([id, st]) => {
+        const tm = mgrLeagueClubs.find((t) => t.id === id) || transferClubs.find((t) => t.id === id);
+        return tm ? { team: tm, ...st } : null;
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null)
       .sort((a, b) => b.p - a.p || b.gp - b.gc - (a.gp - a.gc) || b.gp - a.gp);
-    const rank = sortedTable.findIndex((r) => r.team.id === club.id) + 1;
+    const rank = Math.max(1, sortedTable.findIndex((r) => r.team.id === club.id) + 1);
     const avgFatigue = Math.round(managerSave.squad.reduce((acc, p) => acc + p.fatigue, 0) / managerSave.squad.length);
     const injuredCount = [...managerSave.squad, ...managerSave.bench].filter((p) => p.injuredRounds > 0).length;
 
@@ -604,6 +637,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
           );
           const nextScorers = { ...(managerSave.scorers || {}) };
           const { nextPts, nextSchedule } = advanceRoundTable(
+            mgrLeagueClubs,
             managerSave.points,
             managerSave.schedule,
             managerSave.round,
@@ -851,7 +885,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
           <div className="space-y-4">
             {seasonFinished ? (
               <div className="bg-slate-900 border border-amber-400/50 rounded-xl p-6 text-center space-y-3">
-                <ChampionshipTrophy gold={rank === 1} label={rank === 1 ? `Campeão Brasileiro! ${club.name}` : `Temporada ${managerSave.season} Concluída · ${rank}º Lugar`} />
+                <ChampionshipTrophy gold={rank === 1} label={rank === 1 ? `Campeão! ${club.name}` : `Temporada ${managerSave.season} Concluída · ${rank}º Lugar`} />
                 <p className="text-xs text-slate-300">
                   {rank <= 3 ? 'Diretoria satisfeita! Bônus de R$ 300M creditado para a próxima temporada.' : 'A diretoria espera brigar pelo Top 3 na próxima temporada.'}
                 </p>
@@ -863,8 +897,8 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
                       round: 0,
                       season: managerSave.season + 1,
                       budget: managerSave.budget + (rank <= 3 ? 300 : 120),
-                      points: initTable(brasileiraoClubs),
-                      schedule: buildLeagueSchedule(brasileiraoClubs),
+                      points: initTable(mgrLeagueClubs),
+                      schedule: buildLeagueSchedule(mgrLeagueClubs),
                       scorers: {}
                     })
                   }
@@ -877,7 +911,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
               <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/50 border border-white/15 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
                 <div className="space-y-1.5">
                   <div className="text-xs font-extrabold uppercase tracking-wider text-amber-400">
-                    Próximo Confronto · Rodada {managerSave.round + 1} de 7
+                    Próximo Confronto · Rodada {managerSave.round + 1} de {managerSave.schedule.length}
                   </div>
                   <div className="flex items-center gap-3 text-base font-extrabold text-white">
                     <ClubCrest team={club} className="w-7 h-7" />
@@ -947,8 +981,9 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
                   {managerSave.schedule.map((rd, rIdx) => {
                     const fx = rd.find((f) => f.homeId === club.id || f.awayId === club.id);
                     if (!fx) return null;
-                    const home = brasileiraoClubs.find((t) => t.id === fx.homeId)!;
-                    const away = brasileiraoClubs.find((t) => t.id === fx.awayId)!;
+                    const home = mgrLeagueClubs.find((t) => t.id === fx.homeId) || transferClubs.find((t) => t.id === fx.homeId);
+                    const away = mgrLeagueClubs.find((t) => t.id === fx.awayId) || transferClubs.find((t) => t.id === fx.awayId);
+                    if (!home || !away) return null;
                     const played = fx.homeGoals !== undefined && fx.awayGoals !== undefined;
                     return (
                       <div
@@ -1216,8 +1251,10 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
 
         {hubTab === 'table' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-slate-900/70 border border-white/10 rounded-xl p-4 overflow-x-auto">
-              <div className="text-xs font-extrabold uppercase text-slate-300 mb-2">Classificação do Brasileirão</div>
+            <div className="lg:col-span-2 bg-slate-900/70 border border-white/10 rounded-xl p-4 overflow-x-auto max-h-[420px] overflow-y-auto">
+              <div className="text-xs font-extrabold uppercase text-slate-300 mb-2">
+                Classificação · {mgrLeagueMeta?.name || 'Campeonato'}
+              </div>
               <table className="w-full text-xs tabular-nums">
                 <thead>
                   <tr className="text-slate-400 border-b border-white/10 text-left">
@@ -1255,7 +1292,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
               ) : (
                 <div className="space-y-1.5">
                   {topScorersList.map((sc, i) => {
-                    const c = brasileiraoClubs.find((t) => t.id === sc.clubId);
+                    const c = mgrLeagueClubs.find((t) => t.id === sc.clubId) || transferClubs.find((t) => t.id === sc.clubId);
                     return (
                       <div key={sc.name + sc.clubId} className="flex items-center justify-between bg-slate-950/80 border border-white/10 rounded-lg px-3 py-2 text-xs tabular-nums">
                         <div className="flex items-center gap-2 min-w-0">
@@ -1278,15 +1315,17 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
 
   // ==================== PLAYER CAREER HUB ====================
   if (careerKind === 'player' && playerSave) {
-    const club = transferClubs.find((t) => t.id === playerSave.clubId) || brasileiraoClubs[0];
+    const club = transferClubs.find((t) => t.id === playerSave.clubId) || transferClubs[0];
+    const pLeagueId = playerSave.leagueId || club.leagueId || 'brasileirao';
+    const pLeagueClubs = TEAMS.filter((t) => t.leagueId === pLeagueId);
     const slotIdx = playerSave.custom.role === 'ZAG' ? 1 : playerSave.custom.role === 'MEI' ? 2 : 4;
     const seasonFinished = playerSave.round >= playerSave.schedule.length;
-    const activeScheduleClub = brasileiraoClubs.some((t) => t.id === club.id) ? club.id : brasileiraoClubs[0].id;
+    const activeScheduleClub = pLeagueClubs.some((t) => t.id === club.id) ? club.id : pLeagueClubs[0].id;
     const nextFx = !seasonFinished
       ? playerSave.schedule[playerSave.round].find((f) => f.homeId === activeScheduleClub || f.awayId === activeScheduleClub)
       : null;
     const nextOpp = nextFx
-      ? brasileiraoClubs.find((t) => t.id === (nextFx.homeId === activeScheduleClub ? nextFx.awayId : nextFx.homeId))
+      ? pLeagueClubs.find((t) => t.id === (nextFx.homeId === activeScheduleClub ? nextFx.awayId : nextFx.homeId))
       : null;
 
     const avgRating = playerSave.ratings.length
@@ -1310,6 +1349,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
         (res) => {
           const earnedXp = Math.round(res.playerRating * 16 + res.userGoals * 40 + res.userAssists * 24);
           const { nextPts, nextSchedule } = advanceRoundTable(
+            pLeagueClubs,
             playerSave.points,
             playerSave.schedule,
             playerSave.round,
@@ -1377,8 +1417,8 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
                   ...playerSave,
                   round: 0,
                   season: playerSave.season + 1,
-                  points: initTable(brasileiraoClubs),
-                  schedule: buildLeagueSchedule(brasileiraoClubs)
+                  points: initTable(pLeagueClubs),
+                  schedule: buildLeagueSchedule(pLeagueClubs)
                 })
               }
               className="min-h-[42px] px-6 rounded-xl bg-emerald-600 text-sm font-bold text-white cursor-pointer"
@@ -1390,7 +1430,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
           <div className="bg-gradient-to-r from-slate-900 to-sky-950/50 border border-white/15 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
             <div>
               <div className="text-xs font-extrabold uppercase text-amber-400">
-                Temporada {playerSave.season} · Rodada {playerSave.round + 1} de 7
+                Temporada {playerSave.season} · Rodada {playerSave.round + 1} de {playerSave.schedule.length}
               </div>
               <div className="flex items-center gap-3 text-base font-extrabold text-white mt-0.5">
                 <ClubCrest team={club} className="w-7 h-7" />

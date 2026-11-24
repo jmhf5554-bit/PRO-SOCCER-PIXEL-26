@@ -1,4 +1,5 @@
 import { DifficultyConfig, DifficultyId, LeagueSpec, TeamSpec } from '../types';
+import { EXTRA_CLUBS, buildCompactTeam } from './clubCatalog';
 
 export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
   iniciante: {
@@ -60,17 +61,37 @@ export const DIFFICULTIES: Record<DifficultyId, DifficultyConfig> = {
 };
 
 export const LEAGUES: LeagueSpec[] = [
-  { id: 'brasileirao', name: 'Brasileirão' },
-  { id: 'laliga', name: 'La Liga' },
-  { id: 'premier', name: 'Premier League' },
-  { id: 'bundesliga', name: 'Bundesliga' },
-  { id: 'argentina', name: 'Campeonato Argentino' },
-  { id: 'colombia', name: 'Campeonato Colombiano' },
-  { id: 'outras', name: 'Outras Ligas' },
-  { id: 'selecoes', name: 'Seleções (Copa do Mundo)', isNational: true }
+  { id: 'brasileirao', name: 'Brasil · Brasileirão Série A (20)' },
+  { id: 'br_b', name: 'Brasil · Brasileirão Série B (20)' },
+  { id: 'br_c', name: 'Brasil · Brasileirão Série C (20)' },
+  { id: 'br_d', name: 'Brasil · Brasileirão Série D (20)' },
+  { id: 'premier', name: 'Inglaterra · Premier League (20)' },
+  { id: 'championship', name: 'Inglaterra · EFL Championship (20)' },
+  { id: 'laliga', name: 'Espanha · LaLiga (20)' },
+  { id: 'seriea_it', name: 'Itália · Serie A (20)' },
+  { id: 'bundesliga', name: ' Alemanha · Bundesliga (20)'.trim() },
+  { id: 'ligue1', name: 'França · Ligue 1 (20)' },
+  { id: 'primeira_pt', name: 'Portugal · Primeira Liga (20)' },
+  { id: 'eredivisie', name: 'Países Baixos · Eredivisie (20)' },
+  { id: 'proleague_be', name: 'Bélgica · Pro League (20)' },
+  { id: 'superlig_tr', name: 'Turquia · Süper Lig (20)' },
+  { id: 'scotland', name: 'Escócia · Premiership (20)' },
+  { id: 'greece', name: 'Grécia · Super League (20)' },
+  { id: 'switzerland', name: 'Suíça · Super League (20)' },
+  { id: 'austria', name: 'Áustria · Bundesliga (20)' },
+  { id: 'argentina', name: 'Argentina · Primera División (20)' },
+  { id: 'colombia', name: 'Colômbia · Categoría Primera A (20)' },
+  { id: 'chile', name: 'Chile · Campeonato Nacional (20)' },
+  { id: 'uruguay', name: 'Uruguai · Campeonato Uruguayo (20)' },
+  { id: 'ecuador', name: 'Equador · LigaPro (20)' },
+  { id: 'peru', name: 'Peru · Liga 1 (20)' },
+  { id: 'paraguay', name: 'Paraguai · Primera División (20)' },
+  { id: 'bolivia', name: 'Bolívia · División Profesional (20)' },
+  { id: 'venezuela', name: 'Venezuela · Liga FUTVE (20)' },
+  { id: 'selecoes', name: 'Seleções · Copa do Mundo (20)', isNational: true }
 ];
 
-export const TEAMS: TeamSpec[] = [
+const BASE_TEAMS: TeamSpec[] = [
   // ================= BRASILEIRÃO (8 clubes - Elencos Atualizados + Banco de Reservas) =================
   {
     id: 'flamengo', leagueId: 'brasileirao', name: 'Flamengo', abbr: 'FLA', ovr: 84,
@@ -455,9 +476,9 @@ export const TEAMS: TeamSpec[] = [
     ]
   },
 
-  // ================= OUTRAS LIGAS =================
+  // ================= LIGAS EUROPEIAS PRINCIPAIS (CLUBES DETALHADOS) =================
   {
-    id: 'intermilan', leagueId: 'outras', name: 'Inter Milan', abbr: 'INT', ovr: 86,
+    id: 'intermilan', leagueId: 'seriea_it', name: 'Inter Milan', abbr: 'INT', ovr: 86,
     kit: { pattern: 'stripes_v', c1: '#1d4ed8', c2: '#111827', shorts: '#111827', socks: '#111827', gk: '#eab308', gk2: '#a16207', awayC1: '#f8fafc', awayC2: '#1d4ed8', awayShorts: '#f8fafc', awaySocks: '#f8fafc' },
     players: [
       { num: 1, name: 'Sommer', role: 'GOL', skin: 'fair', hair: 'shaggy', hairColor: '#4c3425', beard: true, boots: '#f8fafc', ovr: 86 },
@@ -468,7 +489,7 @@ export const TEAMS: TeamSpec[] = [
     ]
   },
   {
-    id: 'psg', leagueId: 'outras', name: 'PSG', abbr: 'PSG', ovr: 85,
+    id: 'psg', leagueId: 'ligue1', name: 'PSG', abbr: 'PSG', ovr: 85,
     kit: { pattern: 'tricolor_v', c1: '#1e3a8a', c2: '#dc2626', c3: '#f8fafc', shorts: '#1e3a8a', socks: '#1e3a8a', gk: '#22c55e', gk2: '#15803d', awayC1: '#f8fafc', awayC2: '#1e3a8a', awayShorts: '#f8fafc', awaySocks: '#f8fafc' },
     players: [
       { num: 1, name: 'Donnarumma', role: 'GOL', skin: 'fair', hair: 'short_parted', hairColor: '#2c1f19', beard: true, boots: '#f97316', ovr: 87 },
@@ -479,7 +500,7 @@ export const TEAMS: TeamSpec[] = [
     ]
   },
   {
-    id: 'benfica', leagueId: 'outras', name: 'Benfica', abbr: 'BEN', ovr: 81,
+    id: 'benfica', leagueId: 'primeira_pt', name: 'Benfica', abbr: 'BEN', ovr: 81,
     kit: { pattern: 'solid_trim', c1: '#dc2626', c2: '#991b1b', shorts: '#f8fafc', socks: '#dc2626', gk: '#0ea5e9', gk2: '#0369a1', awayC1: '#111827', awayC2: '#facc15', awayShorts: '#111827', awaySocks: '#111827' },
     players: [
       { num: 1, name: 'Trubin', role: 'GOL', skin: 'fair', hair: 'short_parted', hairColor: '#6b4f3b', boots: '#f8fafc', ovr: 81 },
@@ -487,17 +508,6 @@ export const TEAMS: TeamSpec[] = [
       { num: 10, name: 'Kökçü', role: 'MEI', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', beard: true, boots: '#22c55e', ovr: 82 },
       { num: 11, name: 'Di María', role: 'MEI', skin: 'olive', hair: 'short_fade', hairColor: '#261b16', boots: '#38bdf8', ovr: 83 },
       { num: 14, name: 'Pavlidis', role: 'ATA', skin: 'fair', hair: 'short_parted', hairColor: '#2c1f19', beard: true, boots: '#f97316', ovr: 81 }
-    ]
-  },
-  {
-    id: 'alhilal', leagueId: 'outras', name: 'Al-Hilal', abbr: 'HIL', ovr: 81,
-    kit: { pattern: 'solid_trim', c1: '#1d4ed8', c2: '#1e3a8a', shorts: '#1d4ed8', socks: '#1d4ed8', gk: '#eab308', gk2: '#a16207', awayC1: '#f8fafc', awayC2: '#1d4ed8', awayShorts: '#f8fafc', awaySocks: '#f8fafc' },
-    players: [
-      { num: 37, name: 'Bono', role: 'GOL', skin: 'olive', hair: 'short_fade', hairColor: '#1f1713', beard: true, boots: '#f8fafc', ovr: 83 },
-      { num: 3, name: 'Koulibaly', role: 'ZAG', skin: 'dark', hair: 'bald', hairColor: '#3c200e', beard: true, boots: '#facc15', ovr: 83 },
-      { num: 8, name: 'Rúben Neves', role: 'MEI', skin: 'fair', hair: 'short_parted', hairColor: '#3b281e', beard: true, boots: '#22c55e', ovr: 82 },
-      { num: 10, name: 'Neymar Jr.', role: 'MEI', skin: 'tan', hair: 'mohawk', hairColor: '#1f1713', beard: true, boots: '#facc15', ovr: 85 },
-      { num: 9, name: 'Mitrović', role: 'ATA', skin: 'fair', hair: 'short_fade', hairColor: '#2c1f19', beard: true, boots: '#ef4444', ovr: 83 }
     ]
   },
 
@@ -592,11 +602,14 @@ export const TEAMS: TeamSpec[] = [
   }
 ];
 
+export const TEAMS: TeamSpec[] = [...BASE_TEAMS, ...EXTRA_CLUBS.map(buildCompactTeam)];
+
+const LIGHT_KIT_HEX = new Set(['#f8fafc', '#ffffff', '#fef3c7', '#fef08a']);
+
 export function isKitClash(a: TeamSpec, b: TeamSpec): boolean {
   if (a.id === b.id) return true;
-  if (a.kit.c1 === b.kit.c1) return true;
-  const whites = ['realmadrid', 'saopaulo', 'leipzig', 'river', 'sel_inglaterra', 'sel_alemanha'];
-  if (whites.includes(a.id) && whites.includes(b.id)) return true;
+  if (a.kit.c1.toLowerCase() === b.kit.c1.toLowerCase()) return true;
+  if (LIGHT_KIT_HEX.has(a.kit.c1.toLowerCase()) && LIGHT_KIT_HEX.has(b.kit.c1.toLowerCase())) return true;
   return false;
 }
 
