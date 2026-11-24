@@ -1,4 +1,4 @@
-// Procedural 16-bit Web Audio API sound engine
+// Procedural Web Audio API sound engine
 
 class SoundEngine {
   private ctx: AudioContext | null = null;
@@ -191,6 +191,25 @@ class SoundEngine {
     g.connect(c.destination);
     osc.start(t);
     osc.stop(t + 0.07);
+  }
+
+  playTargetHit() {
+    const c = this.ensure();
+    if (!c) return;
+    const t = c.currentTime;
+    [784, 1046.5, 1318.5].forEach((freq, i) => {
+      const nt = t + i * 0.055;
+      const osc = c.createOscillator();
+      const g = c.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, nt);
+      g.gain.setValueAtTime(0.11, nt);
+      g.gain.exponentialRampToValueAtTime(0.001, nt + 0.16);
+      osc.connect(g);
+      g.connect(c.destination);
+      osc.start(nt);
+      osc.stop(nt + 0.18);
+    });
   }
 
   setMuted(val: boolean) {

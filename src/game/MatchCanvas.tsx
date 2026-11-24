@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Narrator } from '../audio/narrator';
 import { AudioFX } from '../audio/sound';
-import { ClubCrest } from '../components/PixelPreview';
+import { ClubCrest } from '../components/ClubPreview';
 import { DIFFICULTIES, getTeamBench } from '../data/leagues';
 import {
   FormationId,
@@ -14,9 +14,9 @@ import {
 } from '../types';
 import {
   drawClubCrest,
+  drawHDPlayerSprite,
   drawMiniJerseyIcon,
-  drawPixelPlayerSprite,
-  drawSoccerBallPixel
+  drawSoccerBallHD
 } from './sprites';
 
 interface Props {
@@ -90,6 +90,7 @@ interface ReplayFrame {
     y: number;
     dirX: number;
     frame: number;
+    animTime: number;
     action: PlayerEntity['action'];
     diveDir: number;
     ejected: boolean;
@@ -98,14 +99,18 @@ interface ReplayFrame {
   refY: number;
   refDir: number;
   refFrame: number;
+  refAnimTime: number;
 }
+
+const CANVAS_W = 640;
+const CANVAS_H = 360;
 
 const PITCH = {
   halfW: 480,
   halfH: 250,
   goalHalfW: 54,
-  goalHeight: 36,
-  goalDepth: 28,
+  goalHeight: 38,
+  goalDepth: 30,
   boxW: 118,
   boxHalfH: 108,
   sixW: 46,
@@ -155,9 +160,9 @@ const REFEREE_SPEC: PlayerSpec = {
 };
 
 const LED_ADS = [
-  'BRASILEIRÃO 16-BIT  ●  SÉRIE A  ●  TRANSMISSÃO OFICIAL',
-  'EA / PIXEL SIMULAÇÃO  ●  ESTÁDIO NACIONAL  ●  AO VIVO',
-  'COPA DO BRASIL  ●  FAIR PLAY FIFA  ●  TORCIDA PRESENTE'
+  'BRFC  ·  SÉRIE A  ·  TRANSMISSÃO OFICIAL',
+  'TEMPORADA OFICIAL  ·  FAIR PLAY  ·  AO VIVO',
+  'COPA DO BRASIL  ·  ESTÁDIO NACIONAL  ·  HD'
 ];
 
 const WEATHER_LABELS: Record<WeatherId, string> = {
@@ -165,6 +170,21 @@ const WEATHER_LABELS: Record<WeatherId, string> = {
   night: 'Noite c/ Refletores',
   rain: 'Chuva Leve'
 };
+
+function createTurfPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  const tile = document.createElement('canvas');
+  tile.width = 64;
+  tile.height = 64;
+  const tctx = tile.getContext('2d');
+  if (!tctx) return null;
+  for (let i = 0; i < 320; i++) {
+    const x = Math.floor(Math.random() * 64);
+    const y = Math.floor(Math.random() * 64);
+    tctx.fillStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(5, 26, 15, 0.075)';
+    tctx.fillRect(x, y, 1, 1);
+  }
+  return ctx.createPattern(tile, 'repeat');
+}
 
 export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -215,14 +235,31 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     setPieceHint: ''
   });
 
+  const [trainingMode, setTrainingMode] = useState<'free' | 'free_kicks' | 'penalties' | 'finishing_cross'>(
+    config.trainingChallenge || 'free'
+  );
+  const [trainingHud, setTrainingHud] = useState({
+    points: 0,
+    streak: 0,
+    attempts: 0,
+    goals: 0,
+    penHistory: [] as ('goal' | 'miss')[]
+  });
+
   const pausedRef = useRef(false);
   const finishedRef = useRef(false);
   const skipReplayRef = useRef(false);
   const skipPreMatchRef = useRef(false);
+  const trainingModeRef = useRef(trainingMode);
+  const resetTrainingRef = useRef(false);
   const formationRef = useRef<FormationId>(formation);
   const mentalityRef = useRef<MentalityId>(mentality);
   const benchListRef = useRef<PlayerSpec[]>(initialBench);
   const pendingSubRef = useRef<{ starterIdx: number; benchIdx: number } | null>(null);
+
+  useEffect(() => {
+    trainingModeRef.current = trainingMode;
+  }, [trainingMode]);
 
   useEffect(() => {
     benchListRef.current = benchList;
@@ -240,7 +277,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     mentalityRef.current = mentality;
   }, [mentality]);
 
-  // Keep global audio synchronized with menu state
   useEffect(() => {
     setMuted(AudioFX.isMuted());
   }, []);
@@ -259,6 +295,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     if (!ctx) return;
     ctx.imageSmoothingEnabled = false;
 
+    const turfPattern = createTurfPattern(ctx);
     const diff = DIFFICULTIES[config.difficulty];
     const matchDuration = config.matchDurationSec || 90;
     const isTraining = config.mode === 'training';
@@ -323,7 +360,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         };
       });
 
-      return isTraining && side === 'away' ? list.filter((_, i) => i === 0 || i === 1) : list;
+      return isTraining && side === 'away' ? list.filter((_, i) => i === 0 || i === 1 || i === 2 || i === 3) : list;
     };
 
     const g = {
@@ -388,7 +425,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         gk: null as PlayerEntity | null,
         aimY: 0,
         curve: 0,
-        gkChoice: 0, // -1 up, 0 center, 1 down
+        gkChoice: 0,
         aiTimer: 1.0
       },
       players: [
@@ -397,10 +434,10 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       ],
       particles: [] as Particle[],
       skidMarks: [] as SkidMark[],
-      rainDrops: Array.from({ length: 75 }, () => ({
-        x: Math.random() * 480,
-        y: Math.random() * 270,
-        speed: 220 + Math.random() * 90
+      rainDrops: Array.from({ length: 120 }, () => ({
+        x: Math.random() * CANVAS_W,
+        y: Math.random() * CANVAS_H,
+        speed: 480 + Math.random() * 220
       })),
       activeHome: null as PlayerEntity | null,
       activeAway: null as PlayerEntity | null,
@@ -408,6 +445,22 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       p1Power: 0,
       p2Charging: false,
       p2Power: 0,
+      training: {
+        points: 0,
+        streak: 0,
+        attempts: 0,
+        goals: 0,
+        penHistory: [] as ('goal' | 'miss')[],
+        waitingReset: false,
+        resetTimer: 0,
+        crossTimer: 0,
+        crossPending: false,
+        flankSign: 1,
+        shotLive: false,
+        shotIdleTimer: 0,
+        targetHits: [false, false] as [boolean, boolean],
+        volleyScored: false
+      },
       replayBuffer: [] as ReplayFrame[],
       replayFrames: [] as ReplayFrame[],
       replayIdx: 0,
@@ -417,12 +470,12 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     const applyFormationAndMentality = () => {
       const coords = FORMATION_COORDS[formationRef.current];
       const tacOff = getMentalityOffset(mentalityRef.current);
-      g.players.forEach((pl) => {
-        if (pl.side !== 'home' || pl.ejected) return;
+      for (const pl of g.players) {
+        if (pl.side !== 'home' || pl.ejected) continue;
         const form = coords[pl.slotIdx] || coords[4];
         pl.homeX = Math.max(-460, Math.min(460, form.x + (pl.slotIdx > 0 ? tacOff : 0)));
         pl.homeY = form.y;
-      });
+      }
     };
 
     const resetPositions = (kickoffSide: 'home' | 'away') => {
@@ -442,8 +495,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       g.ref.x = 0;
       g.ref.y = -75;
 
-      g.players.forEach((pl) => {
-        if (pl.ejected) return;
+      for (const pl of g.players) {
+        if (pl.ejected) continue;
         pl.x = pl.homeX;
         pl.y = pl.homeY;
         pl.vx = 0;
@@ -455,7 +508,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         pl.stunTimer = 0;
         pl.tackleCooldown = 0;
         pl.offsideFlagged = false;
-      });
+      }
 
       const homeFocus =
         lockedIdx !== undefined
@@ -481,11 +534,95 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       }
     };
 
-    resetPositions('home');
+    const setupTrainingDrill = (mode: 'free' | 'free_kicks' | 'penalties' | 'finishing_cross') => {
+      g.training.waitingReset = false;
+      g.training.resetTimer = 0;
+      g.training.shotLive = false;
+      g.training.shotIdleTimer = 0;
+      g.training.crossPending = false;
+      g.training.targetHits = [false, false];
+      g.training.volleyScored = false;
+
+      if (mode === 'free') {
+        resetPositions('home');
+        g.bannerText = 'TREINO LIVRE';
+        g.bannerSub = 'Drible, passe, finalize e teste jogadas sem pressão';
+        g.bannerTimer = 1.4;
+        return;
+      }
+
+      if (mode === 'penalties') {
+        if (g.training.penHistory.length >= 5) {
+          g.training.penHistory = [];
+        }
+        setupSetPiece('penalty', 'home', PITCH.halfW - 82, 0);
+        g.bannerText = `PÊNALTI ${g.training.penHistory.length + 1}/5`;
+        g.bannerSub = 'W/S escolhe o canto · Segure K para bater!';
+        g.bannerTimer = 1.4;
+        return;
+      }
+
+      if (mode === 'free_kicks') {
+        const fx = 245 + Math.random() * 80;
+        const fy = (Math.random() - 0.5) * 145;
+        setupSetPiece('free_kick', 'home', fx, fy);
+        g.bannerText = 'TREINO DE FALTAS';
+        g.bannerSub = 'Acerte os alvos nos ângulos (+250 pts) · A/D Curva · W/S Mira';
+        g.bannerTimer = 1.5;
+        return;
+      }
+
+      // finishing_cross
+      resetPositions('home');
+      const striker = g.players.find((p) => p.side === 'home' && p.slot === 'ATA') || g.activeHome;
+      const winger = g.players.find((p) => p.side === 'home' && p.slot === 'MEI1');
+      const awayGK = g.players.find((p) => p.side === 'away' && p.slot === 'GOL');
+      const awayCB = g.players.find((p) => p.side === 'away' && p.slot !== 'GOL');
+      g.training.flankSign = g.training.flankSign * -1;
+
+      for (const pl of g.players) {
+        if (pl.side === 'home' && pl !== striker && pl !== winger && pl.slot !== 'GOL') {
+          pl.x = -160;
+          pl.y = pl.homeY;
+        }
+      }
+      if (striker) {
+        striker.x = 325;
+        striker.y = -g.training.flankSign * 22;
+        striker.dirX = 1;
+        g.activeHome = striker;
+      }
+      if (winger) {
+        winger.x = 405;
+        winger.y = g.training.flankSign * 195;
+        winger.dirX = -1;
+        g.ball.owner = winger;
+        g.ball.x = winger.x;
+        g.ball.y = winger.y;
+      }
+      if (awayGK) {
+        awayGK.x = PITCH.halfW - 14;
+        awayGK.y = 0;
+        awayGK.dirX = -1;
+      }
+      if (awayCB) {
+        awayCB.x = 395;
+        awayCB.y = g.training.flankSign * 45;
+      }
+      g.training.crossPending = true;
+      g.training.crossTimer = 0.7;
+      g.state = 'PLAYING';
+      g.bannerText = 'CRUZAMENTO & VOLEIO';
+      g.bannerSub = 'Posicione-se na área e aperte K com a bola no ar!';
+      g.bannerTimer = 1.4;
+    };
+
     if (isTraining) {
+      setupTrainingDrill(trainingModeRef.current);
       AudioFX.playWhistle('kickoff');
-      announce('Arena de Treino pronta! Aperte J, H, L, K ou Espaço.', true);
+      announce('Arena de Treino pronta! Escolha um desafio ou treine livre.', true);
     } else {
+      resetPositions('home');
       announce(`Transmissão ao vivo! ${config.homeTeam.name} enfrenta ${config.awayTeam.name}.`, true);
     }
 
@@ -535,17 +672,17 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
 
-    // 2.5D Isometric Camera Projection
+    // 2.5D Pixel Art Perspective Projection (640x360 crisp internal resolution)
     const worldToScreen = (wx: number, wy: number, wz = 0, camOverride?: { x: number; y: number }) => {
       const cx = camOverride ? camOverride.x : g.camX;
       const cy = camOverride ? camOverride.y : g.camY;
       const dx = wx - cx;
       const dy = wy - cy;
-      const persp = 1 + dy * 0.00062;
-      const skewX = dy * 0.14;
+      const persp = Math.max(0.55, 1 + dy * 0.00072);
+      const yFactor = 0.94 + dy * 0.00018;
       return {
-        x: 240 + (dx * 0.64 + skewX) * persp,
-        y: 146 + dy * 0.45 - wz * 0.88 * persp,
+        x: Math.round(CANVAS_W * 0.5 + dx * 0.72 * persp),
+        y: Math.round(203 + dy * 0.49 * yFactor - wz * 1.05 * persp),
         scale: persp
       };
     };
@@ -553,34 +690,34 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     const spawnDust = (x: number, y: number, count: number, color: string) => {
       for (let i = 0; i < count; i++) {
         g.particles.push({
-          x: x + (Math.random() - 0.5) * 10,
-          y: y + (Math.random() - 0.5) * 6,
+          x: x + (Math.random() - 0.5) * 12,
+          y: y + (Math.random() - 0.5) * 8,
           z: 1 + Math.random() * 4,
-          vx: (Math.random() - 0.5) * 50,
-          vy: (Math.random() - 0.5) * 32,
-          vz: 16 + Math.random() * 32,
+          vx: (Math.random() - 0.5) * 52,
+          vy: (Math.random() - 0.5) * 34,
+          vz: 18 + Math.random() * 34,
           life: 0.25 + Math.random() * 0.22,
           maxLife: 0.48,
           color,
-          size: 2
+          size: 3.4
         });
       }
     };
 
     const spawnConfetti = (gx: number, gy: number, team: TeamSpec) => {
       const colors = [team.kit.c1, team.kit.c2, '#facc15', '#ffffff'];
-      for (let i = 0; i < 36; i++) {
+      for (let i = 0; i < 48; i++) {
         g.particles.push({
-          x: gx + (Math.random() - 0.5) * 36,
-          y: gy + (Math.random() - 0.5) * 80,
-          z: 8 + Math.random() * 24,
-          vx: (Math.random() - 0.5) * 135,
-          vy: (Math.random() - 0.5) * 90,
-          vz: 65 + Math.random() * 90,
-          life: 1.0 + Math.random() * 0.85,
+          x: gx + (Math.random() - 0.5) * 44,
+          y: gy + (Math.random() - 0.5) * 90,
+          z: 8 + Math.random() * 26,
+          vx: (Math.random() - 0.5) * 145,
+          vy: (Math.random() - 0.5) * 95,
+          vz: 70 + Math.random() * 95,
+          life: 1.0 + Math.random() * 0.9,
           maxLife: 1.9,
           color: colors[i % colors.length],
-          size: 2
+          size: 4.5
         });
       }
     };
@@ -618,11 +755,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     const checkPlayerOffsideAtPass = (passer: PlayerEntity, receiver: PlayerEntity | null) => {
       if (isTraining || !receiver || receiver.slot === 'GOL') return;
       const dir = passer.side === 'home' ? 1 : -1;
-      // Must be in opponent half & ahead of the ball
       if (receiver.x * dir <= 12 || (receiver.x - passer.x) * dir <= 8) return;
       const oppFieldPlayers = g.players.filter((o) => !o.ejected && o.side !== passer.side && o.slot !== 'GOL');
       if (oppFieldPlayers.length === 0) return;
-      // Last defender X in attack direction
       let deepestOppX = -dir * 999;
       for (const opp of oppFieldPlayers) {
         if (opp.x * dir > deepestOppX * dir) deepestOppX = opp.x;
@@ -638,9 +773,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       aimY: number,
       kind: 'short' | 'through' | 'cross' = 'short'
     ) => {
-      g.players.forEach((pl) => {
+      for (const pl of g.players) {
         if (pl.side === passer.side) pl.offsideFlagged = false;
-      });
+      }
       const target = findPassTarget(passer, aimX, aimY);
       checkPlayerOffsideAtPass(passer, target);
 
@@ -659,7 +794,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       let ty: number;
 
       if (kind === 'cross') {
-        // Lofted cross into the opponent box / far post or deep target
         if (Math.abs(passer.x - PITCH.halfW * dir) < 220 && Math.abs(passer.y) > 70) {
           tx = (PITCH.halfW - 72) * dir;
           ty = passer.y > 0 ? -38 : 38;
@@ -730,8 +864,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       let targetY: number;
       if (shooter.side === 'away' && !isTwoPlayer) {
-        // Bots intentionally aim for top or bottom corners of the goal!
-        const chosenCorner = shooter.y >= 0 ? -1 : 1; // aim far corner or random corner
+        const chosenCorner = shooter.y >= 0 ? -1 : 1;
         const cornerSign = Math.random() < 0.72 ? chosenCorner : -chosenCorner;
         const cornerY = cornerSign * (PITCH.goalHalfW - 9);
         const variance = (1 - diff.shotAccuracy) * 44 * (Math.random() - 0.5);
@@ -773,12 +906,12 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         announce(`Finalizou ${shooter.data.name}!`);
       }
 
-      g.photoFlash = 0.16;
+      g.photoFlash = 0.22;
       AudioFX.playKick(0.45 + p * 0.55);
       spawnDust(g.ball.x, g.ball.y, p > 0.65 || isVolley ? 10 : 5, '#e2e8f0');
       if (p > 0.6 || isVolley) {
         g.hitstop = 0.035;
-        triggerShake(2.2 + p * 2.2, 0.2);
+        triggerShake(5.5 + p * 4.5, 0.2);
         g.crowdExcite = Math.max(g.crowdExcite, 0.75);
       }
     };
@@ -852,16 +985,15 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           defGK.y = 0;
           defGK.dirX = -attackDir;
         }
-        // Move all other players outside penalty arc
         let idx = 0;
-        g.players.forEach((pl) => {
-          if (pl.ejected || pl === taker || pl === defGK) return;
+        for (const pl of g.players) {
+          if (pl.ejected || pl === taker || pl === defGK) continue;
           pl.x = spotX - attackDir * (95 + (idx % 3) * 24);
           pl.y = -110 + idx * 32;
           pl.dirX = attackDir;
           pl.action = 'idle';
           idx++;
-        });
+        }
         g.bannerText = 'PÊNALTI!';
         g.bannerSub = `${side === 'home' ? config.homeTeam.name : config.awayTeam.name} na marca da cal`;
       } else {
@@ -871,7 +1003,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         taker.y = y;
         taker.dirX = attackDir;
         taker.dirY = 0;
-        // Position 2-3 man defensive wall ~92px in front of the ball toward goal
         const goalX = PITCH.halfW * attackDir;
         const gx = goalX - x;
         const gy = 0 - y;
@@ -920,17 +1051,12 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       const insideBox =
         victim.x * attackDir > PITCH.halfW - PITCH.boxW && Math.abs(victim.y) < PITCH.boxHalfH;
 
-      // Card decision
       let cardType: 'yellow' | 'red' | null = null;
       if (fromBehind && insideBox) {
         cardType = 'red';
       } else if (fromBehind || Math.random() < 0.7) {
         offender.yellowCards++;
-        if (offender.yellowCards >= 2) {
-          cardType = 'red';
-        } else {
-          cardType = 'yellow';
-        }
+        cardType = offender.yellowCards >= 2 ? 'red' : 'yellow';
       }
 
       if (cardType === 'red') {
@@ -943,7 +1069,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         announce(`Falta dura! Cartão amarelo para ${offender.data.name}.`, true);
       }
 
-      // Move referee near foul spot
       g.ref.x = Math.max(-380, Math.min(380, victim.x - 16));
       g.ref.y = Math.max(-200, Math.min(200, victim.y - 26));
 
@@ -987,6 +1112,36 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     };
 
     const scoreGoal = (scoringSide: 'home' | 'away') => {
+      if (isTraining && trainingModeRef.current !== 'free') {
+        const mode = trainingModeRef.current;
+        g.training.attempts++;
+        if (scoringSide === 'home') {
+          g.homeScore++;
+          g.training.goals++;
+          g.training.streak++;
+          const hitTarget = g.training.targetHits[0] || g.training.targetHits[1];
+          const bonus = mode === 'free_kicks' && hitTarget ? 250 : mode === 'finishing_cross' && g.training.volleyScored ? 200 : 100;
+          g.training.points += bonus;
+          if (mode === 'penalties') g.training.penHistory.push('goal');
+          g.netRippleRight = 1.0;
+          g.bannerText = hitTarget ? 'NA GAVETA! +250' : g.training.volleyScored ? 'GOLAÇO DE VOLEIO! +200' : 'GOOOOL! +100';
+          g.bannerSub = `Sequência: ${g.training.streak}x · Pontos: ${g.training.points}`;
+          g.bannerTimer = 1.25;
+          spawnConfetti(g.ball.x, g.ball.y, config.homeTeam);
+          AudioFX.playTargetHit();
+          announce(`Golaço no treino! ${bonus} pontos conquistados!`, true);
+        } else {
+          g.training.streak = 0;
+          if (mode === 'penalties') g.training.penHistory.push('miss');
+        }
+        g.training.waitingReset = true;
+        g.training.resetTimer = 1.25;
+        g.training.shotLive = false;
+        g.ball.vx *= 0.25;
+        g.ball.vy *= 0.25;
+        return;
+      }
+
       g.state = 'GOAL_CELEBRATION';
       g.stateTimer = 1.6;
       g.lastGoalTeam = scoringSide;
@@ -1018,14 +1173,13 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       g.bannerSub = `${team.name.toUpperCase()} · ${scorerTxt}`;
       g.bannerTimer = 1.6;
       g.crowdExcite = 1.0;
-      g.photoFlash = 0.25;
-      triggerShake(4.2, 0.35);
+      g.photoFlash = 0.35;
+      triggerShake(9.0, 0.35);
       spawnConfetti(g.ball.x, g.ball.y, team);
       AudioFX.playWhistle('goal');
       AudioFX.playGoalCelebration();
       announce(`GOOOOOOOL! É DO ${team.name.toUpperCase()}! ${scorerTxt} balança as redes!`, true);
 
-      // Prepare ~3s slow-motion TV replay (96 frames @ 32fps = 3.0s)
       g.replayFrames = g.replayBuffer.slice(-96);
       skipReplayRef.current = false;
     };
@@ -1060,22 +1214,22 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
     const checkGoalsAndBounds = () => {
       const b = g.ball;
-      [-1, 1].forEach((sideSign) => {
+      for (const sideSign of [-1, 1]) {
         const gx = PITCH.halfW * sideSign;
         if (Math.abs(b.x - gx) < 7 && b.z < PITCH.goalHeight + 5) {
-          [-PITCH.goalHalfW, PITCH.goalHalfW].forEach((postY) => {
+          for (const postY of [-PITCH.goalHalfW, PITCH.goalHalfW]) {
             if (Math.abs(b.y - postY) < 7) {
               b.vx = -b.vx * 0.72;
               b.vy = (b.y - postY) * 14;
               b.x = gx - sideSign * 8;
               AudioFX.playPostClang();
-              triggerShake(3.0, 0.18);
+              triggerShake(6.5, 0.18);
               spawnDust(gx, postY, 6, '#e2e8f0');
               announce('NA TRAVE! Quase o gol!', true);
             }
-          });
+          }
         }
-      });
+      }
 
       if (b.x > PITCH.halfW && Math.abs(b.y) < PITCH.goalHalfW - 2 && b.z < PITCH.goalHeight) {
         scoreGoal('home');
@@ -1090,8 +1244,18 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         const cy = (b.y > 0 ? 1 : -1) * (PITCH.halfH - 10);
         const cx = Math.max(-PITCH.halfW + 30, Math.min(PITCH.halfW - 30, b.x));
         if (isTraining) {
+          if (trainingModeRef.current !== 'free' && !g.training.waitingReset) {
+            g.training.attempts++;
+            g.training.streak = 0;
+            if (trainingModeRef.current === 'penalties') g.training.penHistory.push('miss');
+            g.bannerText = 'PARA FORA!';
+            g.bannerSub = 'Preparando próxima tentativa...';
+            g.bannerTimer = 1.0;
+            g.training.waitingReset = true;
+            g.training.resetTimer = 1.1;
+          }
           b.y = cy;
-          b.vy = -b.vy * 0.5;
+          b.vy = -b.vy * 0.45;
         } else {
           quickSetPiece(b.lastTouchTeam === 'home' ? 'away' : 'home', cx, cy, 'LATERAL');
         }
@@ -1100,8 +1264,18 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       if (Math.abs(b.x) > PITCH.halfW + 6) {
         if (isTraining) {
+          if (trainingModeRef.current !== 'free' && !g.training.waitingReset) {
+            g.training.attempts++;
+            g.training.streak = 0;
+            if (trainingModeRef.current === 'penalties') g.training.penHistory.push('miss');
+            g.bannerText = 'FOI PARA FORA!';
+            g.bannerSub = 'Preparando próxima tentativa...';
+            g.bannerTimer = 1.0;
+            g.training.waitingReset = true;
+            g.training.resetTimer = 1.1;
+          }
           b.x = (b.x > 0 ? 1 : -1) * (PITCH.halfW - 10);
-          b.vx = -b.vx * 0.5;
+          b.vx = -b.vx * 0.45;
           return;
         }
         const onRight = b.x > 0;
@@ -1222,6 +1396,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           y: p.y,
           dirX: p.dirX,
           frame: p.frame,
+          animTime: p.animTime,
           action: p.action,
           diveDir: p.diveDir,
           ejected: p.ejected
@@ -1229,7 +1404,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         refX: g.ref.x,
         refY: g.ref.y,
         refDir: g.ref.dirX,
-        refFrame: g.ref.frame
+        refFrame: g.ref.frame,
+        refAnimTime: g.ref.animTime
       });
       if (g.replayBuffer.length > 130) g.replayBuffer.shift();
     };
@@ -1237,7 +1413,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     const updateSim = (rawDt: number) => {
       const dt = Math.min(rawDt, 0.05);
 
-      // Process pending substitution from Pause menu even before resuming
       if (pendingSubRef.current) {
         const { starterIdx, benchIdx } = pendingSubRef.current;
         pendingSubRef.current = null;
@@ -1260,10 +1435,49 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         }
       }
 
+      if (resetTrainingRef.current) {
+        resetTrainingRef.current = false;
+        if (isTraining) setupTrainingDrill(trainingModeRef.current);
+      }
+
       if (pausedRef.current || g.state === 'ENDED') return;
 
-      // Sync formation & mentality live
       applyFormationAndMentality();
+
+      if (isTraining && trainingModeRef.current !== 'free') {
+        if (g.training.waitingReset) {
+          g.training.resetTimer -= dt;
+          if (g.training.resetTimer <= 0) {
+            setupTrainingDrill(trainingModeRef.current);
+            return;
+          }
+        }
+        if (trainingModeRef.current === 'finishing_cross' && g.training.crossPending) {
+          g.training.crossTimer -= dt;
+          if (g.training.crossTimer <= 0) {
+            g.training.crossPending = false;
+            const winger = g.players.find((p) => p.side === 'home' && p.slot === 'MEI1');
+            const striker = g.activeHome;
+            if (winger && striker) {
+              g.ball.owner = null;
+              g.ball.pickupCooldown = 0.25;
+              const tx = 395;
+              const ty = striker.y * 0.4;
+              const dx = tx - winger.x;
+              const dy = ty - winger.y;
+              const dist = Math.hypot(dx, dy) || 1;
+              const spd = Math.min(340, Math.max(240, dist * 1.15));
+              g.ball.vx = (dx / dist) * spd;
+              g.ball.vy = (dy / dist) * spd;
+              g.ball.vz = 175;
+              winger.action = 'kick';
+              winger.actionTimer = 0.25;
+              AudioFX.playKick(0.5);
+              announce('Cruzamento na área! Bata de primeira!');
+            }
+          }
+        }
+      }
 
       if (g.shakeTime > 0) g.shakeTime = Math.max(0, g.shakeTime - dt);
       if (g.bannerTimer > 0) g.bannerTimer = Math.max(0, g.bannerTimer - dt);
@@ -1282,15 +1496,15 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       }
 
       if (weather === 'rain') {
-        g.rainDrops.forEach((rd) => {
+        for (const rd of g.rainDrops) {
           rd.x -= rd.speed * 0.25 * dt;
           rd.y += rd.speed * dt;
-          if (rd.y > 270) {
-            rd.y = -10;
-            rd.x = Math.random() * 520;
+          if (rd.y > CANVAS_H) {
+            rd.y = -14;
+            rd.x = Math.random() * (CANVAS_W + 120);
           }
-          if (rd.x < -10) rd.x += 500;
-        });
+          if (rd.x < -14) rd.x += CANVAS_W + 60;
+        }
       }
 
       for (let i = g.particles.length - 1; i >= 0; i--) {
@@ -1314,7 +1528,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         return;
       }
 
-      // PRE_MATCH TV LINEUPS INTRO
       if (g.state === 'PRE_MATCH') {
         g.preMatchTimer -= dt;
         if (skipPreMatchRef.current || g.preMatchTimer <= 0) {
@@ -1330,7 +1543,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         return;
       }
 
-      // SET PIECE (Free Kick & Penalty Kick)
       if (g.state === 'SET_PIECE') {
         const sp = g.setPiece;
         const taker = sp.taker;
@@ -1363,7 +1575,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             g.p1Charging = false;
             g.p1Power = 0;
             g.state = 'PLAYING';
-            // If penalty, CPU goalkeeper guesses a dive corner
             if (sp.kind === 'penalty' && sp.gk) {
               const diveSign = Math.random() < 0.42 ? -1 : Math.random() < 0.72 ? 1 : 0;
               if (diveSign !== 0) {
@@ -1373,10 +1584,14 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               }
             }
             performShot(taker, pwr, sp.aimY, false, sp.kind === 'free_kick' ? sp.curve * 165 : 0);
+            if (isTraining) {
+              g.training.shotLive = true;
+              g.training.shotIdleTimer = 0;
+              g.training.volleyScored = false;
+            }
             return;
           }
         } else if (taker) {
-          // User controls GK dive during CPU penalty!
           if (sp.kind === 'penalty') {
             const mv = getP1Move();
             if (mv.iy < 0) sp.gkChoice = -1;
@@ -1397,12 +1612,11 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         return;
       }
 
-      // GOAL CELEBRATION -> teammates run to scorer!
       if (g.state === 'GOAL_CELEBRATION') {
         g.stateTimer -= dt;
         const scorer = g.lastScorer;
-        g.players.forEach((pl) => {
-          if (pl.ejected) return;
+        for (const pl of g.players) {
+          if (pl.ejected) continue;
           if (pl.side === g.lastGoalTeam) {
             pl.action = 'celebrate';
             if (scorer && pl !== scorer) {
@@ -1422,7 +1636,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           } else {
             pl.action = 'idle';
           }
-        });
+        }
         g.ball.x += g.ball.vx * dt;
         g.ball.y += g.ball.vy * dt;
         g.ball.vx *= 0.9;
@@ -1443,9 +1657,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         return;
       }
 
-      // 3-SECOND SLOW-MOTION TV REPLAY
       if (g.state === 'REPLAY') {
-        g.replayAcc += dt * 32; // 96 frames / 32 = 3.0s
+        g.replayAcc += dt * 32;
         while (g.replayAcc >= 1) {
           g.replayAcc -= 1;
           g.replayIdx++;
@@ -1484,8 +1697,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       }
       if (g.ball.pickupCooldown > 0) g.ball.pickupCooldown -= dt;
 
-      // P1 Expanded FIFA Controls:
-      // WASD/Arrows move | Shift switch (defending) / Sprint (held) | J short pass | H through pass | L high cross | K shot/tackle | Space shield/body feint
       const p1Move = getP1Move();
       const homeHasBall = g.ball.owner && g.ball.owner.side === 'home';
       const p1ShiftJust = keysJust.has('ShiftLeft') || keysJust.has('ShiftRight');
@@ -1507,7 +1718,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       if (p1 && g.ball.owner === p1) {
         if (p1SpaceJust && p1.feintCooldown <= 0) {
-          // Body feint cut / burst
           const fdirY = p1Move.iy !== 0 ? p1Move.iy : p1.y > 0 ? -1 : 1;
           p1.y = Math.max(-PITCH.halfH + 12, Math.min(PITCH.halfH - 12, p1.y + fdirY * 14));
           p1.x = Math.max(-PITCH.halfW + 12, Math.min(PITCH.halfW - 12, p1.x + p1.dirX * 10));
@@ -1532,6 +1742,11 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           if (g.p1Charging && p1ShootHeld) g.p1Power = Math.min(1, g.p1Power + dt * 1.75);
           if (g.p1Charging && (!p1ShootHeld || p1ShootReleased)) {
             performShot(p1, g.p1Power, p1Move.iy);
+            if (isTraining) {
+              g.training.shotLive = true;
+              g.training.shotIdleTimer = 0;
+              g.training.volleyScored = false;
+            }
             g.p1Charging = false;
             g.p1Power = 0;
           }
@@ -1541,8 +1756,13 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         g.p1Power = 0;
         if (p1ShortPass && !p1ShiftJust) switchClosest('home');
         if (p1ShootJust && p1 && p1.slot !== 'GOL' && !p1.ejected) {
-          if (!g.ball.owner && g.ball.z > 9 && Math.hypot(p1.x - g.ball.x, p1.y - g.ball.y) < 30) {
-            performShot(p1, 0.88, p1Move.iy, true);
+          if (!g.ball.owner && g.ball.z > 8 && Math.hypot(p1.x - g.ball.x, p1.y - g.ball.y) < 34) {
+            performShot(p1, 0.9, p1Move.iy, true);
+            if (isTraining) {
+              g.training.shotLive = true;
+              g.training.shotIdleTimer = 0;
+              g.training.volleyScored = true;
+            }
           } else {
             performTackle(p1);
           }
@@ -1554,7 +1774,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         const p2Switch = keysJust.has('ControlRight') || keysJust.has('Comma');
         const p2Pass = keysJust.has('KeyN') || keysJust.has('Numpad1');
         const p2ShootHeld = keysHeld.has('KeyM') || keysHeld.has('Numpad2') || keysHeld.has('Enter');
-        const p2ShootJust = keysJust.has('KeyM') || keysJust.has('Numpad2') || keysJust.has('Enter');
+        const p2ShootJust = keysJust.has('KeyM') || keysHeld.has('Numpad2') || keysHeld.has('Enter');
         if (g.ball.owner && g.ball.owner.side === 'away') g.activeAway = g.ball.owner;
         const p2 = g.activeAway;
 
@@ -1591,7 +1811,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         }
       }
 
-      // Referee tracking ball calmly
       const rtx = Math.max(-360, Math.min(360, g.ball.x * 0.72));
       const rty = Math.max(-195, Math.min(195, g.ball.y - 68));
       const rdx = rtx - g.ref.x;
@@ -1607,10 +1826,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         g.ref.frame = 0;
       }
 
-      // Update players
       let foulTriggered = false;
-      g.players.forEach((pl) => {
-        if (pl.ejected || foulTriggered) return;
+      for (const pl of g.players) {
+        if (pl.ejected || foulTriggered) continue;
         if (pl.tackleCooldown > 0) pl.tackleCooldown -= dt;
         if (pl.stunTimer > 0) pl.stunTimer -= dt;
         if (pl.aiPassCooldown > 0) pl.aiPassCooldown -= dt;
@@ -1630,14 +1848,13 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           if (g.ball.owner && g.ball.owner.side !== pl.side) {
             const victim = g.ball.owner;
             if (Math.hypot(pl.x - victim.x, pl.y - victim.y) < 20) {
-              // Detect foul from behind or reckless hit
               const dotDir = pl.dirX * victim.dirX + pl.dirY * victim.dirY;
               const fromBehind = dotDir > 0.35 && (pl.x - victim.x) * victim.dirX < -4;
               const distToBall = Math.hypot(pl.x - g.ball.x, pl.y - g.ball.y);
               if (fromBehind || (distToBall > 14 && Math.random() < 0.42)) {
                 callFoul(pl, victim, fromBehind);
                 foulTriggered = true;
-                return;
+                break;
               }
               victim.stunTimer = 0.45;
               g.ball.owner = pl;
@@ -1652,7 +1869,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 g.activeAway = pl;
               }
               g.hitstop = 0.035;
-              triggerShake(2.0, 0.14);
+              triggerShake(4.8, 0.14);
               spawnDust(pl.x, pl.y, 6, '#e2e8f0');
             }
           } else if (!g.ball.owner && g.ball.z < 18 && Math.hypot(pl.x - g.ball.x, pl.y - g.ball.y) < 20) {
@@ -1663,14 +1880,14 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           }
           pl.x = Math.max(-PITCH.halfW - 14, Math.min(PITCH.halfW + 14, pl.x));
           pl.y = Math.max(-PITCH.halfH - 10, Math.min(PITCH.halfH + 10, pl.y));
-          return;
+          continue;
         }
 
         if (pl.action === 'dive') {
           pl.y += pl.diveDir * 155 * diff.gkSpeedMult * dt;
           pl.x = Math.max(-PITCH.halfW - 14, Math.min(PITCH.halfW + 14, pl.x));
           pl.y = Math.max(-PITCH.halfH - 10, Math.min(PITCH.halfH + 10, pl.y));
-          return;
+          continue;
         }
 
         if (pl.stunTimer > 0) {
@@ -1679,7 +1896,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           pl.x += pl.vx * dt;
           pl.y += pl.vy * dt;
           pl.action = 'idle';
-          return;
+          continue;
         }
 
         let mx = 0;
@@ -1763,11 +1980,10 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
         pl.x = Math.max(-PITCH.halfW - 14, Math.min(PITCH.halfW + 14, pl.x));
         pl.y = Math.max(-PITCH.halfH - 10, Math.min(PITCH.halfH + 10, pl.y));
-      });
+      }
 
       if (foulTriggered) return;
 
-      // Soft separation
       for (let i = 0; i < g.players.length; i++) {
         const a = g.players[i];
         if (a.ejected) continue;
@@ -1787,7 +2003,6 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         }
       }
 
-      // Ball physics
       const b = g.ball;
       if (b.owner) {
         const ow = b.owner;
@@ -1802,8 +2017,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         b.curve = 0;
         b.spin += Math.hypot(ow.vx, ow.vy) * dt * 0.08;
 
-        g.players.forEach((other) => {
-          if (other.ejected) return;
+        for (const other of g.players) {
+          if (other.ejected) continue;
           if (other.side !== ow.side && other.stunTimer <= 0 && b.pickupCooldown <= 0) {
             const d = Math.hypot(other.x - b.x, other.y - b.y);
             const shieldPenalty = ow.shieldTimer > 0 ? -4 : 0;
@@ -1819,11 +2034,11 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               if (other.side === 'home' && other.slot !== 'GOL' && lockedIdx === undefined) g.activeHome = other;
               if (other.side === 'away' && other.slot !== 'GOL' && isTwoPlayer) g.activeAway = other;
               AudioFX.playKick(0.2);
+              break;
             }
           }
-        });
+        }
       } else {
-        // Apply Magnus curve force during flight
         if (Math.abs(b.curve) > 1) {
           b.vy += b.curve * dt;
           b.curve *= Math.pow(0.55, dt);
@@ -1853,16 +2068,44 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         const speed = Math.hypot(b.vx, b.vy);
         b.spin += speed * dt * 0.085;
 
+        // Free kick glowing corner targets check
+        if (isTraining && trainingModeRef.current === 'free_kicks' && !g.training.waitingReset) {
+          const targetYs = [-PITCH.goalHalfW + 14, PITCH.goalHalfW - 14];
+          targetYs.forEach((ty, ti) => {
+            if (!g.training.targetHits[ti] && Math.abs(b.x - PITCH.halfW) < 16 && Math.abs(b.y - ty) < 16 && b.z >= 10 && b.z <= PITCH.goalHeight) {
+              g.training.targetHits[ti] = true;
+              AudioFX.playTargetHit();
+              spawnDust(PITCH.halfW, ty, 12, '#facc15');
+            }
+          });
+        }
+
+        // If drill shot stopped or saved in non-free training mode, trigger reset
+        if (isTraining && trainingModeRef.current !== 'free' && g.training.shotLive && !g.training.waitingReset) {
+          if (speed < 36 && b.z < 2) {
+            g.training.shotIdleTimer += dt;
+            if (g.training.shotIdleTimer > 0.55) {
+              g.training.attempts++;
+              g.training.streak = 0;
+              if (trainingModeRef.current === 'penalties') g.training.penHistory.push('miss');
+              g.bannerText = 'DEFENDEU / PAROU!';
+              g.bannerSub = 'Preparando próxima tentativa...';
+              g.bannerTimer = 1.0;
+              g.training.waitingReset = true;
+              g.training.resetTimer = 1.05;
+            }
+          }
+        }
+
         if (b.pickupCooldown <= 0 && b.z < 24) {
           for (let i = 0; i < g.players.length; i++) {
             const pl = g.players[i];
             if (pl.ejected || pl.stunTimer > 0) continue;
             const r = pl.slot === 'GOL' ? (pl.action === 'dive' ? 21 : 15) : 13;
             if (Math.hypot(pl.x - b.x, pl.y - b.y) < r) {
-              // Offside whistle check when flagged attacker touches pass
               if (pl.offsideFlagged && b.lastTouchTeam === pl.side) {
                 pl.offsideFlagged = false;
-                g.players.forEach((x) => (x.offsideFlagged = false));
+                for (const x of g.players) x.offsideFlagged = false;
                 const oppSide = pl.side === 'home' ? 'away' : 'home';
                 g.bannerText = 'IMPEDIMENTO!';
                 g.bannerSub = `${pl.data.name} estava adiantado`;
@@ -1871,7 +2114,24 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 setupSetPiece('free_kick', oppSide, Math.max(-440, Math.min(440, pl.x)), pl.y);
                 return;
               }
-              g.players.forEach((x) => (x.offsideFlagged = false));
+              for (const x of g.players) x.offsideFlagged = false;
+
+              if (isTraining && trainingModeRef.current !== 'free' && pl.side === 'away') {
+                g.training.attempts++;
+                g.training.streak = 0;
+                if (trainingModeRef.current === 'penalties') g.training.penHistory.push('miss');
+                g.bannerText = pl.slot === 'GOL' ? 'GRANDE DEFESA!' : 'NA BARREIRA!';
+                g.bannerSub = 'Preparando próxima tentativa...';
+                g.bannerTimer = 1.0;
+                g.training.waitingReset = true;
+                g.training.resetTimer = 1.1;
+                b.vx = -120;
+                b.vy = (Math.random() - 0.5) * 90;
+                b.vz = 35;
+                b.pickupCooldown = 0.4;
+                AudioFX.playKick(0.4);
+                break;
+              }
 
               const saveChance = pl.side === 'away' ? 0.25 + diff.gkSaveBonus * 0.5 : 0.45;
               if (pl.slot === 'GOL' && speed > 350 && Math.random() < saveChance) {
@@ -1900,8 +2160,11 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       }
 
       const lookAhead = b.owner ? (b.owner.side === 'home' ? 42 : -42) : b.vx * 0.14;
-      const targetCamX = Math.max(-225, Math.min(225, b.x + lookAhead));
-      const targetCamY = Math.max(-95, Math.min(95, b.y * 0.58));
+      const lockedUser = lockedIdx !== undefined ? g.activeHome : null;
+      const focusX = lockedUser ? lockedUser.x * 0.55 + b.x * 0.45 : b.x + lookAhead;
+      const focusY = lockedUser ? lockedUser.y * 0.55 + b.y * 0.45 : b.y * 0.58;
+      const targetCamX = Math.max(-225, Math.min(225, focusX));
+      const targetCamY = Math.max(-95, Math.min(95, focusY));
       g.camX += (targetCamX - g.camX) * Math.min(1, dt * 6.5);
       g.camY += (targetCamY - g.camY) * Math.min(1, dt * 6.5);
 
@@ -1913,22 +2176,69 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       const camOverride = snap ? { x: snap.camX, y: snap.camY } : undefined;
       const nowSec = performance.now() * 0.001;
 
-      const drawProjectedPoly = (pts: number[][], fill: string | null, stroke?: string, lw?: number) => {
-        ctx.beginPath();
-        pts.forEach((pt, i) => {
-          const s = worldToScreen(pt[0], pt[1], pt[2] || 0, camOverride);
-          if (i === 0) ctx.moveTo(Math.round(s.x), Math.round(s.y));
-          else ctx.lineTo(Math.round(s.x), Math.round(s.y));
-        });
-        ctx.closePath();
+      ctx.imageSmoothingEnabled = false;
+
+      // Crisp Pixel-Stepped Bresenham Line Helper (no anti-aliasing blur on pitch lines)
+      const plotPixelLine = (
+        x0: number,
+        y0: number,
+        x1: number,
+        y1: number,
+        color: string,
+        thickness = 1
+      ) => {
+        let ix0 = Math.round(x0);
+        let iy0 = Math.round(y0);
+        const ix1 = Math.round(x1);
+        const iy1 = Math.round(y1);
+        const dx = Math.abs(ix1 - ix0);
+        const dy = Math.abs(iy1 - iy0);
+        const sx = ix0 < ix1 ? 1 : -1;
+        const sy = iy0 < iy1 ? 1 : -1;
+        let err = dx - dy;
+        const off = Math.floor(thickness * 0.5);
+        ctx.fillStyle = color;
+
+        let guard = 0;
+        while (guard++ < 1200) {
+          ctx.fillRect(ix0 - off, iy0 - off, thickness, thickness);
+          if (ix0 === ix1 && iy0 === iy1) break;
+          const e2 = 2 * err;
+          if (e2 > -dy) {
+            err -= dy;
+            ix0 += sx;
+          }
+          if (e2 < dx) {
+            err += dx;
+            iy0 += sy;
+          }
+        }
+      };
+
+      const drawProjectedPoly = (
+        pts: number[][],
+        fill: string | CanvasGradient | CanvasPattern | null,
+        stroke?: string,
+        lw?: number
+      ) => {
+        const scr = pts.map((pt) => worldToScreen(pt[0], pt[1], pt[2] || 0, camOverride));
         if (fill) {
+          ctx.beginPath();
+          scr.forEach((s, i) => {
+            if (i === 0) ctx.moveTo(s.x, s.y);
+            else ctx.lineTo(s.x, s.y);
+          });
+          ctx.closePath();
           ctx.fillStyle = fill;
           ctx.fill();
         }
         if (stroke) {
-          ctx.strokeStyle = stroke;
-          ctx.lineWidth = lw || 1;
-          ctx.stroke();
+          const t = Math.max(1, Math.round(lw || 1));
+          for (let i = 0; i < scr.length; i++) {
+            const a = scr[i];
+            const b = scr[(i + 1) % scr.length];
+            plotPixelLine(a.x, a.y, b.x, b.y, stroke, t);
+          }
         }
       };
 
@@ -1944,31 +2254,58 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       ) => {
         const p1 = worldToScreen(x1, y1, z1, camOverride);
         const p2 = worldToScreen(x2, y2, z2, camOverride);
-        ctx.strokeStyle = color;
-        ctx.lineWidth = w;
-        ctx.beginPath();
-        ctx.moveTo(Math.round(p1.x), Math.round(p1.y));
-        ctx.lineTo(Math.round(p2.x), Math.round(p2.y));
-        ctx.stroke();
+        plotPixelLine(p1.x, p1.y, p2.x, p2.y, color, Math.max(1, Math.round(w)));
+      };
+
+      const drawPixelSteward = (sx: number, sy: number, facing: number) => {
+        const sp = worldToScreen(sx, sy, 0, camOverride);
+        if (sp.x < -20 || sp.x > CANVAS_W + 20 || sp.y < -20 || sp.y > CANVAS_H + 20) return;
+        const sc = 0.85 * sp.scale;
+        const w = (v: number) => Math.max(1, Math.round(v * sc));
+        const px = sp.x;
+        const py = sp.y;
+        // Ground shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(px - w(4), py, w(8), w(2));
+        // Dark trousers + outline
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(px - w(4), py - w(7), w(8), w(7));
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(px - w(3), py - w(6), w(6), w(6));
+        // Yellow High-Vis Vest
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(px - w(5), py - w(14), w(10), w(8));
+        ctx.fillStyle = '#facc15';
+        ctx.fillRect(px - w(4), py - w(13), w(8), w(6));
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillRect(px - w(4), py - w(10), w(8), w(1));
+        // Head & cap
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(px - w(3), py - w(20), w(6), w(6));
+        ctx.fillStyle = '#d49a6a';
+        ctx.fillRect(px - w(2), py - w(19), w(4), w(4));
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(px - w(3), py - w(20), w(6), w(2));
+        ctx.fillRect(px + (facing > 0 ? 0 : -w(4)), py - w(19), w(4), w(1));
       };
 
       ctx.save();
       if (g.shakeTime > 0 && !snap) {
         ctx.translate(
-          Math.round((Math.random() - 0.5) * 2 * g.shakeMag),
-          Math.round((Math.random() - 0.5) * 2 * g.shakeMag)
+          Math.round((Math.random() - 0.5) * g.shakeMag),
+          Math.round((Math.random() - 0.5) * g.shakeMag)
         );
       }
 
-      // Weather-adjusted outer stadium concrete & turf tones
-      const bgTone = weather === 'night' ? '#0f291e' : weather === 'rain' ? '#1f4e3c' : '#2c6850';
-      const turfA = weather === 'night' ? '#2e6f56' : weather === 'rain' ? '#36755d' : '#3f8a6d';
-      const turfB = weather === 'night' ? '#367f63' : weather === 'rain' ? '#3e8469' : '#4a9b7b';
+      // Outer Stadium Apron Base
+      const outerBg = weather === 'night' ? '#081b14' : weather === 'rain' ? '#0f2d21' : '#164e36';
+      ctx.fillStyle = outerBg;
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-      ctx.fillStyle = bgTone;
-      ctx.fillRect(0, 0, 480, 270);
+      // Vibrant Pixel Cup Soccer Mown Turf Stripes
+      const turfA = weather === 'night' ? '#1f6a47' : weather === 'rain' ? '#257b52' : '#2d9a67';
+      const turfB = weather === 'night' ? '#267e55' : weather === 'rain' ? '#2c8c5e' : '#36ac75';
 
-      // Slanted vertical mown grass stripes
       const numStripes = 16;
       const fullW = PITCH.halfW * 2 + 120;
       const stripeW = fullW / numStripes;
@@ -1979,128 +2316,213 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           [
             [x0, -PITCH.halfH - 50],
             [x1, -PITCH.halfH - 50],
-            [x1, PITCH.halfH + 55],
-            [x0, PITCH.halfH + 55]
+            [x1, PITCH.halfH + 65],
+            [x0, PITCH.halfH + 65]
           ],
           i % 2 === 0 ? turfA : turfB
         );
       }
 
-      // === STADIUM STANDS (TOP CROWD), LED BOARDS, TEAM BENCHES & PHOTOGRAPHERS ===
-      // Top concrete walkway & stands
-      drawProjectedPoly(
-        [
-          [-PITCH.halfW - 80, -PITCH.halfH - 125],
-          [PITCH.halfW + 80, -PITCH.halfH - 125],
-          [PITCH.halfW + 80, -PITCH.halfH - 42],
-          [-PITCH.halfW - 80, -PITCH.halfH - 42]
-        ],
-        weather === 'night' ? '#111827' : '#1e293b'
-      );
-
-      // Animated pixel spectators in top stands wearing Home & Away colors
-      for (let sx = -470; sx <= 470; sx += 18) {
-        for (let row = 0; row < 2; row++) {
-          const sy = -PITCH.halfH - 64 - row * 22;
-          const jump =
-            Math.sin(nowSec * (4 + g.crowdExcite * 9) + sx * 0.13 + row) * (1 + g.crowdExcite * 3.5);
-          const sp = worldToScreen(sx, sy, Math.max(0, jump), camOverride);
-          if (sp.x < -10 || sp.x > 490) continue;
-          const isHomeFan = sx < 0 || (sx % 36 === 0);
-          const shirtCol = isHomeFan ? config.homeTeam.kit.c1 : config.awayTeam.kit.c1;
-          ctx.fillStyle = '#0b0f17';
-          ctx.fillRect(Math.round(sp.x) - 3, Math.round(sp.y) - 6, 6, 7);
-          ctx.fillStyle = shirtCol;
-          ctx.fillRect(Math.round(sp.x) - 2, Math.round(sp.y) - 3, 4, 3);
-          ctx.fillStyle = '#e2b289';
-          ctx.fillRect(Math.round(sp.x) - 1, Math.round(sp.y) - 5, 2, 2);
-        }
-      }
-
-      // Animated LED Advertising Boards along top touchline
-      for (let bx = -460; bx < 460; bx += 115) {
-        const idx = Math.floor((bx + 460) / 115);
-        const adCol = idx % 2 === 0 ? '#0f172a' : '#1e1b4b';
+      // Crisp Pixel Turf Texture Grain
+      if (turfPattern) {
+        ctx.save();
         drawProjectedPoly(
           [
-            [bx, -PITCH.halfH - 28],
-            [bx + 110, -PITCH.halfH - 28],
-            [bx + 110, -PITCH.halfH - 18],
-            [bx, -PITCH.halfH - 18]
+            [-PITCH.halfW - 60, -PITCH.halfH - 50],
+            [PITCH.halfW + 60, -PITCH.halfH - 50],
+            [PITCH.halfW + 60, PITCH.halfH + 65],
+            [-PITCH.halfW - 60, PITCH.halfH + 65]
           ],
-          adCol,
-          '#334155',
-          1
+          turfPattern
         );
-        const pMid = worldToScreen(bx + 55, -PITCH.halfH - 22, 6, camOverride);
-        if (pMid.x > -40 && pMid.x < 520) {
-          ctx.font = 'bold 4px monospace';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = idx % 2 === 0 ? '#facc15' : '#38bdf8';
-          const adStr = LED_ADS[idx % LED_ADS.length];
-          const scrollShift = Math.floor(nowSec * 12) % adStr.length;
-          ctx.fillText(adStr.slice(scrollShift, scrollShift + 18), Math.round(pMid.x), Math.round(pMid.y));
-          ctx.textAlign = 'left';
+        ctx.restore();
+      }
+
+      // === TWO-TIER PIXEL STADIUM STANDS (TOP BACKGROUND) ===
+      drawProjectedPoly(
+        [
+          [-PITCH.halfW - 180, -PITCH.halfH - 220],
+          [PITCH.halfW + 180, -PITCH.halfH - 220],
+          [PITCH.halfW + 180, -PITCH.halfH - 44],
+          [-PITCH.halfW - 180, -PITCH.halfH - 44]
+        ],
+        weather === 'night' ? '#090f1d' : '#162032'
+      );
+
+      // Pixel Concourse Dividers
+      drawProjectedLine(-PITCH.halfW - 160, -PITCH.halfH - 118, 0, PITCH.halfW + 160, -PITCH.halfH - 118, 0, '#475569', 2);
+      drawProjectedLine(-PITCH.halfW - 160, -PITCH.halfH - 45, 0, PITCH.halfW + 160, -PITCH.halfH - 45, 0, '#64748b', 2);
+
+      // Animated Jumping Pixel Spectators in Club Colors
+      for (let row = 0; row < 4; row++) {
+        const sy = -PITCH.halfH - 64 - row * 24 - (row >= 2 ? 12 : 0);
+        for (let sx = -540; sx <= 540; sx += 18) {
+          const jump = Math.max(
+            0,
+            Math.round(Math.sin(nowSec * (4.5 + g.crowdExcite * 9.5) + sx * 0.14 + row * 1.1) * (1 + g.crowdExcite * 4))
+          );
+          const sp = worldToScreen(sx, sy, jump, camOverride);
+          if (sp.x < -10 || sp.x > CANVAS_W + 10 || sp.y < -8 || sp.y > 130) continue;
+          const isHomeFan = sx < 20 || sx % 36 === 0;
+          const shirtCol = isHomeFan ? config.homeTeam.kit.c1 : config.awayTeam.kit.c1;
+          const fw = Math.max(3, Math.round(5 * sp.scale));
+          const fh = Math.max(3, Math.round(4 * sp.scale));
+          ctx.fillStyle = '#111111';
+          ctx.fillRect(sp.x - Math.floor(fw / 2) - 1, sp.y - fh - 1, fw + 2, fh + 2);
+          ctx.fillStyle = shirtCol;
+          ctx.fillRect(sp.x - Math.floor(fw / 2), sp.y - fh, fw, fh);
+          ctx.fillStyle = (sx + row) % 3 === 0 ? '#8d552c' : '#e2b289';
+          ctx.fillRect(sp.x - 1, sp.y - fh - 3, 3, 3);
+          if (g.crowdExcite > 0.35 && (sx + row) % 2 === 0) {
+            ctx.fillStyle = shirtCol;
+            ctx.fillRect(sp.x - Math.floor(fw / 2) - 2, sp.y - fh - 3, 2, 3);
+            ctx.fillRect(sp.x + Math.floor(fw / 2) + 1, sp.y - fh - 3, 2, 3);
+          }
         }
       }
 
-      // Team Benches (Dugouts) with substitutes and coaching staff on top touchline
+      // Pixel LED Advertising Boards
+      for (let bx = -470; bx < 470; bx += 117) {
+        const idx = Math.floor((bx + 470) / 117);
+        const pL = worldToScreen(bx, -PITCH.halfH - 22, 0, camOverride);
+        const pR = worldToScreen(bx + 114, -PITCH.halfH - 22, 0, camOverride);
+        const boardH = Math.max(6, Math.round(9 * pL.scale));
+        const bw = Math.max(10, pR.x - pL.x);
+        ctx.fillStyle = idx % 3 === 0 ? '#064e3b' : idx % 3 === 1 ? '#1e3a8a' : '#7f1d1d';
+        ctx.fillRect(pL.x, pL.y - boardH, bw, boardH);
+        ctx.fillStyle = '#111827';
+        ctx.fillRect(pL.x, pL.y - boardH, bw, 1);
+        ctx.fillRect(pL.x, pL.y - 1, bw, 1);
+
+        const midX = Math.round((pL.x + pR.x) * 0.5);
+        if (midX > -40 && midX < CANVAS_W + 40) {
+          ctx.font = `700 ${Math.max(5, Math.round(5.5 * pL.scale))}px Silkscreen, monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = idx % 2 === 0 ? '#fde047' : '#f8fafc';
+          ctx.fillText(LED_ADS[idx % LED_ADS.length], midX, pL.y - Math.floor(boardH * 0.45), bw - 4);
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'alphabetic';
+        }
+      }
+
+      // Pixel LED boards behind Left & Right Goal Lines
+      [-1, 1].forEach((sideSign) => {
+        const bx = (PITCH.halfW + 30) * sideSign;
+        [
+          [-235, -75],
+          [75, 235]
+        ].forEach(([y0, y1], bi) => {
+          drawProjectedPoly(
+            [
+              [bx, y0, 0],
+              [bx, y1, 0],
+              [bx, y1, 7],
+              [bx, y0, 7]
+            ],
+            bi % 2 === 0 ? '#0f172a' : '#1e1b4b',
+            '#38bdf8',
+            1
+          );
+        });
+      });
+
+      // Pixel Team Dugouts (Bancos de Reservas)
       [
-        { x0: -250, x1: -115, team: config.homeTeam, useAway: config.homeUseAway },
-        { x0: 115, x1: 250, team: config.awayTeam, useAway: config.awayUseAway }
+        { x0: -255, x1: -115, team: config.homeTeam, useAway: config.homeUseAway },
+        { x0: 115, x1: 255, team: config.awayTeam, useAway: config.awayUseAway }
       ].forEach((dug) => {
         drawProjectedPoly(
           [
-            [dug.x0, -PITCH.halfH - 42],
-            [dug.x1, -PITCH.halfH - 42],
-            [dug.x1, -PITCH.halfH - 29],
-            [dug.x0, -PITCH.halfH - 29]
+            [dug.x0, -PITCH.halfH - 46],
+            [dug.x1, -PITCH.halfH - 46],
+            [dug.x1, -PITCH.halfH - 30],
+            [dug.x0, -PITCH.halfH - 30]
           ],
-          'rgba(15, 23, 42, 0.85)',
-          '#94a3b8',
+          '#0f172a',
+          '#64748b',
           1
         );
-        // Substitutes & coach icons
         for (let si = 0; si < 4; si++) {
-          const dp = worldToScreen(dug.x0 + 20 + si * 28, -PITCH.halfH - 35, 0, camOverride);
-          if (dp.x > -10 && dp.x < 490) {
-            ctx.fillStyle = '#0b0f17';
-            ctx.fillRect(Math.round(dp.x) - 2, Math.round(dp.y) - 6, 4, 6);
-            ctx.fillStyle = si === 0 ? '#334155' : dug.useAway ? dug.team.kit.awayC1 : dug.team.kit.c1;
-            ctx.fillRect(Math.round(dp.x) - 1, Math.round(dp.y) - 4, 3, 3);
+          const dp = worldToScreen(dug.x0 + 22 + si * 30, -PITCH.halfH - 36, 0, camOverride);
+          if (dp.x > -12 && dp.x < CANVAS_W + 12) {
+            const sc = dp.scale;
+            const sw = Math.max(4, Math.round(5 * sc));
+            const sh = Math.max(5, Math.round(6 * sc));
+            ctx.fillStyle = '#111111';
+            ctx.fillRect(dp.x - Math.floor(sw / 2) - 1, dp.y - sh - 1, sw + 2, sh + 2);
+            ctx.fillStyle = si === 0 ? '#475569' : dug.useAway ? dug.team.kit.awayC1 : dug.team.kit.c1;
+            ctx.fillRect(dp.x - Math.floor(sw / 2), dp.y - sh, sw, sh);
             ctx.fillStyle = '#e2b289';
-            ctx.fillRect(Math.round(dp.x) - 1, Math.round(dp.y) - 6, 2, 2);
+            ctx.fillRect(dp.x - 1, dp.y - sh - 3, 3, 3);
           }
         }
       });
 
-      // Photographers behind left & right goal lines
+      // Pixel Security Stewards in Yellow Vests
+      [-340, -90, 90, 340].forEach((sx) => {
+        drawPixelSteward(sx, -PITCH.halfH - 13, 1);
+      });
       [-1, 1].forEach((sideSign) => {
-        [-115, -80, 80, 115].forEach((py) => {
-          const pp = worldToScreen((PITCH.halfW + 38) * sideSign, py, 0, camOverride);
-          if (pp.x > -10 && pp.x < 490 && pp.y > 0 && pp.y < 270) {
-            ctx.fillStyle = '#0b0f17';
-            ctx.fillRect(Math.round(pp.x) - 2, Math.round(pp.y) - 5, 5, 5);
-            ctx.fillStyle = '#ea580c'; // photographer bib
-            ctx.fillRect(Math.round(pp.x) - 1, Math.round(pp.y) - 3, 3, 3);
-            ctx.fillStyle = '#1e293b'; // camera lens
-            ctx.fillRect(Math.round(pp.x) - (sideSign > 0 ? 3 : -1), Math.round(pp.y) - 4, 2, 2);
-            if (g.photoFlash > 0 && Math.random() < 0.25) {
+        [-170, 170].forEach((sy) => drawPixelSteward((PITCH.halfW + 46) * sideSign, sy, -sideSign));
+      });
+
+      // Pixel-Art Photographers behind Left & Right Goal Lines (Matched Scale to Players)
+      [-1, 1].forEach((sideSign) => {
+        [-130, -90, 90, 130].forEach((py) => {
+          const pp = worldToScreen((PITCH.halfW + 48) * sideSign, py, 0, camOverride);
+          if (pp.x > -24 && pp.x < CANVAS_W + 24 && pp.y > 0 && pp.y < CANVAS_H) {
+            const sc = 0.88 * pp.scale;
+            const px = pp.x;
+            const pyy = pp.y;
+            const u = (v: number) => Math.max(1, Math.round(v * sc));
+            // Ground shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.36)';
+            ctx.fillRect(px - u(6), pyy, u(12), u(3));
+            // Kneeling trousers
+            ctx.fillStyle = '#111111';
+            ctx.fillRect(px - u(5), pyy - u(9), u(10), u(9));
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(px - u(4), pyy - u(8), u(8), u(7));
+            // Photographer orange bib
+            ctx.fillStyle = '#111111';
+            ctx.fillRect(px - u(6), pyy - u(20), u(12), u(12));
+            ctx.fillStyle = '#ea580c';
+            ctx.fillRect(px - u(5), pyy - u(19), u(10), u(10));
+            // Head + hair
+            ctx.fillStyle = '#111111';
+            ctx.fillRect(px - u(4), pyy - u(28), u(8), u(8));
+            ctx.fillStyle = '#e2b289';
+            ctx.fillRect(px - u(3), pyy - u(27), u(6), u(6));
+            ctx.fillStyle = '#1f1713';
+            ctx.fillRect(px - u(4), pyy - u(28), u(8), u(3));
+            // White Telephoto Lens aimed toward pitch
+            const aimDir = sideSign > 0 ? -1 : 1;
+            ctx.fillStyle = '#111111';
+            ctx.fillRect(px + (aimDir > 0 ? u(2) : -u(13)), pyy - u(19), u(11), u(5));
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillRect(px + (aimDir > 0 ? u(3) : -u(12)), pyy - u(18), u(9), u(3));
+
+            if (g.photoFlash > 0 && Math.random() < 0.35) {
+              const flashX = px + aimDir * u(12);
+              const flashY = pyy - u(17);
               ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-              ctx.fillRect(Math.round(pp.x) - 2, Math.round(pp.y) - 6, 4, 4);
+              ctx.fillRect(flashX - u(4), flashY - u(4), u(8), u(8));
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(flashX - u(2), flashY - u(2), u(4), u(4));
             }
           }
         });
       });
 
       // Turf wear / slide tackle skid marks
-      g.skidMarks.forEach((sk) => {
-        const alpha = Math.max(0.1, (sk.life / sk.maxLife) * 0.48);
-        drawProjectedLine(sk.x1, sk.y1, 0, sk.x2, sk.y2, 0, `rgba(22, 48, 32, ${alpha})`, 2.2);
-      });
+      for (const sk of g.skidMarks) {
+        const alpha = Math.max(0.1, (sk.life / sk.maxLife) * 0.45);
+        drawProjectedLine(sk.x1, sk.y1, 0, sk.x2, sk.y2, 0, `rgba(14, 38, 22, ${alpha})`, 2);
+      }
 
-      // Crisp pitch markings
-      const lineCol = weather === 'night' ? '#ecfdf5' : '#e3f9ee';
+      // Crisp Pixel-Stepped Pitch Markings (Pixel Cup Soccer Style)
+      const lineCol = weather === 'night' ? '#ecfdf5' : '#f8fafc';
       drawProjectedPoly(
         [
           [-PITCH.halfW, -PITCH.halfH],
@@ -2110,26 +2532,23 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         ],
         null,
         lineCol,
-        1.6
+        2
       );
-      drawProjectedLine(0, -PITCH.halfH, 0, 0, PITCH.halfH, 0, lineCol, 1.5);
+      drawProjectedLine(0, -PITCH.halfH, 0, 0, PITCH.halfH, 0, lineCol, 2);
 
-      ctx.strokeStyle = lineCol;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      for (let a = 0; a <= 24; a++) {
-        const ang = (a / 24) * Math.PI * 2;
-        const s = worldToScreen(Math.cos(ang) * 72, Math.sin(ang) * 72, 0, camOverride);
-        if (a === 0) ctx.moveTo(s.x, s.y);
-        else ctx.lineTo(s.x, s.y);
+      // Pixel-Stepped Center Circle & Kickoff Spot
+      let prevC = worldToScreen(72, 0, 0, camOverride);
+      for (let a = 1; a <= 44; a++) {
+        const ang = (a / 44) * Math.PI * 2;
+        const curC = worldToScreen(Math.cos(ang) * 72, Math.sin(ang) * 72, 0, camOverride);
+        plotPixelLine(prevC.x, prevC.y, curC.x, curC.y, lineCol, 2);
+        prevC = curC;
       }
-      ctx.stroke();
-
       const cs = worldToScreen(0, 0, 0, camOverride);
       ctx.fillStyle = lineCol;
-      ctx.fillRect(Math.round(cs.x) - 1, Math.round(cs.y) - 1, 3, 2);
+      ctx.fillRect(cs.x - 2, cs.y - 1, 4, 3);
 
-      // Penalty boxes, 6-yard boxes, pixel D-arcs, and penalty spots
+      // Penalty boxes, 6-yard boxes, pixel-stepped D-arcs & crisp pixel "X" penalty spots
       [-1, 1].forEach((side) => {
         const gx = PITCH.halfW * side;
         const bx = (PITCH.halfW - PITCH.boxW) * side;
@@ -2143,7 +2562,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           ],
           null,
           lineCol,
-          1.5
+          2
         );
         drawProjectedPoly(
           [
@@ -2154,29 +2573,27 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           ],
           null,
           lineCol,
-          1.3
+          2
         );
 
-        ctx.fillStyle = lineCol;
-        for (let a = -12; a <= 12; a++) {
-          const ang = (a / 12) * 0.72;
+        let prevArc: { x: number; y: number } | null = null;
+        for (let a = -20; a <= 20; a++) {
+          const ang = (a / 20) * 0.72;
           const ax = (PITCH.halfW - 82) * side - Math.cos(ang) * 58 * side;
           const ay = Math.sin(ang) * 58;
           if ((side === -1 && ax > bx) || (side === 1 && ax < bx)) {
             const sp = worldToScreen(ax, ay, 0, camOverride);
-            ctx.fillRect(Math.round(sp.x), Math.round(sp.y), 2, 2);
+            if (prevArc) {
+              plotPixelLine(prevArc.x, prevArc.y, sp.x, sp.y, lineCol, 2);
+            }
+            prevArc = sp;
           }
         }
 
+        // Pixel "X" Penalty Mark
         const ps = worldToScreen((PITCH.halfW - 82) * side, 0, 0, camOverride);
-        const px = Math.round(ps.x);
-        const py = Math.round(ps.y);
-        ctx.fillStyle = lineCol;
-        ctx.fillRect(px - 2, py - 1, 1, 1);
-        ctx.fillRect(px + 1, py - 1, 1, 1);
-        ctx.fillRect(px - 1, py, 2, 1);
-        ctx.fillRect(px - 2, py + 1, 1, 1);
-        ctx.fillRect(px + 1, py + 1, 1, 1);
+        plotPixelLine(ps.x - 2, ps.y - 2, ps.x + 2, ps.y + 2, lineCol, 1);
+        plotPixelLine(ps.x - 2, ps.y + 2, ps.x + 2, ps.y - 2, lineCol, 1);
       });
 
       // Set Piece Aiming & Curve Guide
@@ -2185,16 +2602,56 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         const aimWorldY = g.setPiece.aimY * (PITCH.goalHalfW - 6);
         const midX = (g.ball.x + PITCH.halfW * atkDir) * 0.5;
         const midY = (g.ball.y + aimWorldY) * 0.5 + g.setPiece.curve * 45;
-        drawProjectedLine(g.ball.x, g.ball.y, 4, midX, midY, 10, '#facc15', 1.4);
-        drawProjectedLine(midX, midY, 10, PITCH.halfW * atkDir, aimWorldY, 6, '#facc15', 1.4);
+        drawProjectedLine(g.ball.x, g.ball.y, 4, midX, midY, 10, '#facc15', 2);
+        drawProjectedLine(midX, midY, 10, PITCH.halfW * atkDir, aimWorldY, 6, '#facc15', 2);
       }
 
+      // Free-Kick Training Corner Pixel Targets
+      if (isTraining && trainingModeRef.current === 'free_kicks') {
+        [-PITCH.goalHalfW + 14, PITCH.goalHalfW - 14].forEach((ty, ti) => {
+          const hit = g.training.targetHits[ti];
+          const tp = worldToScreen(PITCH.halfW - 1, ty, 24, camOverride);
+          const sz = Math.max(5, Math.round(7 * tp.scale));
+          ctx.fillStyle = '#111111';
+          ctx.fillRect(tp.x - sz - 1, tp.y - sz - 1, sz * 2 + 2, sz * 2 + 2);
+          ctx.fillStyle = hit ? '#4ade80' : '#facc15';
+          ctx.fillRect(tp.x - sz, tp.y - sz, sz * 2, sz * 2);
+          ctx.fillStyle = hit ? '#14532d' : '#ef4444';
+          ctx.fillRect(tp.x - Math.floor(sz / 2), tp.y - Math.floor(sz / 2), sz, sz);
+        });
+      }
+
+      // Player Career Tactical Positioning Indicator on Turf
+      if (lockedIdx !== undefined && g.activeHome && !snap && g.ball.owner !== g.activeHome) {
+        const up = g.activeHome;
+        const teamHas = g.ball.owner?.side === 'home';
+        const idealX = Math.max(-PITCH.halfW + 45, Math.min(PITCH.halfW - 45, up.homeX + g.ball.x * 0.38 + (teamHas ? 85 : -40)));
+        const idealY = Math.max(-PITCH.halfH + 28, Math.min(PITCH.halfH - 28, up.homeY + g.ball.y * 0.28));
+        if (Math.hypot(up.x - idealX, up.y - idealY) > 48) {
+          const ip = worldToScreen(idealX, idealY, 0, camOverride);
+          const rx = Math.round(10 * ip.scale);
+          const ry = Math.round(5 * ip.scale);
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+          ctx.fillRect(ip.x - rx, ip.y - ry, rx * 2, ry * 2);
+          ctx.strokeStyle = '#6ee7b7';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(ip.x - rx, ip.y - ry, rx * 2, ry * 2);
+          ctx.font = '700 6px Silkscreen, monospace';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#6ee7b7';
+          ctx.fillText(`POS (${up.data.role})`, ip.x, ip.y + ry + 8);
+          ctx.textAlign = 'left';
+        }
+      }
+
+      // 3D Pixel Art Goals with Cyan/White Stanchions & Crisp Grid Net
       const drawGoal = (sideSign: number, ripple: number) => {
         const gx = PITCH.halfW * sideSign;
-        const backX = (PITCH.halfW + PITCH.goalDepth) * sideSign + Math.sin(ripple * 18) * ripple * 4.5 * sideSign;
+        const backX = (PITCH.halfW + PITCH.goalDepth) * sideSign + Math.sin(ripple * 18) * ripple * 6.5 * sideSign;
         const topY = -PITCH.goalHalfW;
         const botY = PITCH.goalHalfW;
         const gh = PITCH.goalHeight;
+
         drawProjectedPoly(
           [
             [gx, topY],
@@ -2202,47 +2659,55 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             [backX, botY],
             [gx, botY]
           ],
-          'rgba(10, 32, 24, 0.25)'
+          'rgba(6, 20, 14, 0.32)'
         );
-        const netC = 'rgba(225, 248, 238, 0.58)';
-        for (let i = 1; i <= 7; i++) {
-          const ny = topY + ((botY - topY) * i) / 8;
+
+        const netC = 'rgba(240, 253, 250, 0.65)';
+        for (let i = 1; i <= 10; i++) {
+          const ny = topY + ((botY - topY) * i) / 11;
           drawProjectedLine(backX, ny, 0, backX, ny, gh, netC, 1);
           drawProjectedLine(gx, ny, gh, backX, ny, gh, netC, 1);
         }
-        for (let j = 1; j <= 4; j++) {
-          const nz = (gh * j) / 5;
+        for (let j = 1; j <= 5; j++) {
+          const nz = (gh * j) / 6;
           drawProjectedLine(backX, topY, nz, backX, botY, nz, netC, 1);
           drawProjectedLine(gx, topY, nz, backX, topY, nz, netC, 1);
           drawProjectedLine(gx, botY, nz, backX, botY, nz, netC, 1);
         }
-        drawProjectedLine(gx, topY, 0, gx, topY, gh, '#f8fafc', 2.2);
-        drawProjectedLine(gx, botY, 0, gx, botY, gh, '#f8fafc', 2.2);
-        drawProjectedLine(gx, topY, gh, gx, botY, gh, '#f8fafc', 2.2);
-        drawProjectedLine(gx, topY, gh, backX, topY, gh, '#cbd5e1', 1.2);
-        drawProjectedLine(gx, botY, gh, backX, botY, gh, '#cbd5e1', 1.2);
-        drawProjectedLine(backX, topY, 0, backX, topY, gh, '#38bdf8', 1.4);
-        drawProjectedLine(backX, botY, 0, backX, botY, gh, '#38bdf8', 1.4);
-        drawProjectedLine(backX, topY, 0, backX, botY, 0, '#0284c7', 1.4);
+
+        // Rear support frame (teal/slate pixel beams)
+        drawProjectedLine(gx, topY, gh, backX, topY, gh, '#94a3b8', 2);
+        drawProjectedLine(gx, botY, gh, backX, botY, gh, '#94a3b8', 2);
+        drawProjectedLine(backX, topY, 0, backX, topY, gh, '#0e7490', 2);
+        drawProjectedLine(backX, botY, 0, backX, botY, gh, '#0e7490', 2);
+        drawProjectedLine(backX, topY, 0, backX, botY, 0, '#0f172a', 2);
+
+        // Front Pixel Goal Posts & Crossbar
+        drawProjectedLine(gx, topY, 0, gx, topY, gh, '#0e7490', 4);
+        drawProjectedLine(gx, topY, 0, gx, topY, gh, '#ffffff', 2);
+        drawProjectedLine(gx, botY, 0, gx, botY, gh, '#0e7490', 4);
+        drawProjectedLine(gx, botY, 0, gx, botY, gh, '#ffffff', 2);
+        drawProjectedLine(gx, topY, gh, gx, botY, gh, '#94a3b8', 4);
+        drawProjectedLine(gx, topY, gh, gx, botY, gh, '#ffffff', 2);
       };
 
       const activeBall = snap ? snap.ball : g.ball;
       const drawBall = () => {
-        // Realistic elliptical shadow scaling with ball height (z)
         const sh = worldToScreen(activeBall.x, activeBall.y, 0, camOverride);
-        const radX = Math.max(2.5, 4.4 - activeBall.z * 0.025);
-        const radY = Math.max(1.2, 2.1 - activeBall.z * 0.01);
-        const shadowAlpha = Math.max(0.18, 0.45 - activeBall.z * 0.0025);
-        ctx.fillStyle = `rgba(6, 20, 12, ${shadowAlpha})`;
-        ctx.beginPath();
-        ctx.ellipse(Math.round(sh.x), Math.round(sh.y) + 1, radX, radY, 0, 0, Math.PI * 2);
-        ctx.fill();
+        if (activeBall.z > 4) {
+          // Crisp Pixel Cup Soccer dark dash shadow when ball is airborne
+          const dashW = Math.max(5, Math.round((8 - activeBall.z * 0.04) * sh.scale));
+          ctx.fillStyle = 'rgba(6, 20, 12, 0.72)';
+          ctx.fillRect(sh.x - Math.floor(dashW / 2), sh.y, dashW, 2);
+        } else {
+          ctx.fillStyle = 'rgba(6, 20, 12, 0.48)';
+          ctx.fillRect(sh.x - 4, sh.y, 8, 2);
+          ctx.fillRect(sh.x - 3, sh.y - 1, 6, 4);
+        }
 
         const pos = worldToScreen(activeBall.x, activeBall.y, activeBall.z, camOverride);
-        const bx = Math.round(pos.x);
-        const by = Math.round(pos.y) - 3;
-        const r = Math.max(3, Math.round(3.6 * pos.scale));
-        drawSoccerBallPixel(ctx, bx, by, r, activeBall.spin);
+        const r = Math.max(4, Math.round(4.6 * pos.scale));
+        drawSoccerBallHD(ctx, pos.x, Math.round(pos.y - r * 0.72), r, activeBall.spin);
       };
 
       const drawables: { y: number; fn: () => void }[] = [
@@ -2250,24 +2715,25 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         { y: -PITCH.goalHalfW - 1, fn: () => drawGoal(1, g.netRippleRight) }
       ];
 
-      // Draw Referee
+      // Draw Pixel Referee
       const refX = snap ? snap.refX : g.ref.x;
       const refY = snap ? snap.refY : g.ref.y;
       drawables.push({
         y: refY,
         fn: () => {
           const rp = worldToScreen(refX, refY, 0, camOverride);
-          drawPixelPlayerSprite(
+          drawHDPlayerSprite(
             ctx,
-            Math.round(rp.x),
-            Math.round(rp.y),
-            1.05 * rp.scale,
+            rp.x,
+            rp.y,
+            0.88 * rp.scale,
             REFEREE_SPEC,
             config.homeTeam,
             false,
             {
               dirX: snap ? snap.refDir : g.ref.dirX,
               frame: snap ? snap.refFrame : g.ref.frame,
+              animTime: snap ? snap.refAnimTime : g.ref.animTime,
               action: 'run',
               shadow: true,
               isReferee: true
@@ -2276,16 +2742,17 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         }
       });
 
-      // Draw Players
-      g.players.forEach((pl) => {
+      // Draw Pixel Players
+      for (const pl of g.players) {
         const snapP = snap ? snap.players.find((sp) => sp.id === pl.id) : null;
         const isEjected = snapP ? snapP.ejected : pl.ejected;
-        if (isEjected) return;
+        if (isEjected) continue;
 
         const wx = snapP ? snapP.x : pl.x;
         const wy = snapP ? snapP.y : pl.y;
         const dirX = snapP ? snapP.dirX : pl.dirX;
         const frame = snapP ? snapP.frame : pl.frame;
+        const animTime = snapP ? snapP.animTime : pl.animTime;
         const action = snapP ? snapP.action : pl.action;
         const diveDir = snapP ? snapP.diveDir : pl.diveDir;
 
@@ -2293,179 +2760,200 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           y: wy,
           fn: () => {
             const pos = worldToScreen(wx, wy, 0, camOverride);
-            const px = Math.round(pos.x);
-            const py = Math.round(pos.y);
+            const px = pos.x;
+            const py = pos.y;
+            const sc = 0.92 * pos.scale;
 
             const isP1 = pl === g.activeHome;
             const isP2 = isTwoPlayer && pl === g.activeAway;
             const isCarrier = snap ? snap.ball.ownerId === pl.id : g.ball.owner === pl;
 
+            // Iconic Pixel Cup Soccer 4-Arc Segmented Selector Ring
             if (isP1 || isP2 || isCarrier) {
               const col = isP2 && !isP1 ? '#fb7185' : '#22d3ee';
+              const rx = 11 * pos.scale;
+              const ry = 4.6 * pos.scale;
+              ctx.save();
               ctx.strokeStyle = col;
-              ctx.lineWidth = isCarrier ? 2 : 1.4;
-              const segs = [
-                [0.2, 1.3],
+              ctx.lineWidth = 2;
+              const arcs = [
+                [0.2, 1.25],
                 [1.8, 2.9],
-                [3.4, 4.5],
-                [5.0, 6.1]
+                [3.35, 4.4],
+                [4.95, 6.0]
               ];
-              segs.forEach(([a0, a1]) => {
+              for (const [a0, a1] of arcs) {
                 ctx.beginPath();
-                ctx.ellipse(px, py + 1, 10, 4.2, 0, a0, a1);
+                ctx.ellipse(px, py + 1, rx, ry, 0, a0, a1);
                 ctx.stroke();
-              });
+              }
+              ctx.restore();
             }
 
             if (!snap && ((isP1 && g.p1Charging) || (isP2 && g.p2Charging))) {
               const pwr = isP1 ? g.p1Power : g.p2Power;
-              ctx.fillStyle = '#0f172a';
-              ctx.fillRect(px - 11, py + 5, 22, 4);
+              const bw = Math.round(24 * pos.scale);
+              ctx.fillStyle = '#090d16';
+              ctx.fillRect(px - Math.floor(bw / 2), py + 5, bw, 4);
               ctx.fillStyle = pwr > 0.7 ? '#ef4444' : pwr > 0.4 ? '#facc15' : '#22c55e';
-              ctx.fillRect(px - 10, py + 6, Math.round(20 * pwr), 2);
+              ctx.fillRect(px - Math.floor(bw / 2) + 1, py + 6, Math.max(2, Math.round((bw - 2) * pwr)), 2);
             }
 
-            drawPixelPlayerSprite(ctx, px, py, 1.05 * pos.scale, pl.data, pl.team, pl.useAway, {
+            drawHDPlayerSprite(ctx, px, py, sc, pl.data, pl.team, pl.useAway, {
               dirX,
               frame,
+              animTime,
               action,
               diveDir,
               shadow: true
             });
 
+            // Crisp Pixel Triangle Indicator above controlled player
             if (isP1 || isP2) {
-              const bob = Math.round(Math.sin(performance.now() * 0.01) * 1.4);
-              const ay = py - 30 + bob;
+              const bob = Math.round(Math.sin(performance.now() * 0.009) * 1.5);
+              const ay = Math.round(py - 33 * sc + bob);
               const col = isP1 ? '#22d3ee' : '#fb7185';
-              ctx.fillStyle = '#0b0f17';
-              ctx.fillRect(px - 3, ay - 1, 7, 2);
-              ctx.fillRect(px - 2, ay + 1, 5, 1);
-              ctx.fillRect(px - 1, ay + 2, 3, 1);
-              ctx.fillRect(px, ay + 3, 1, 1);
+              ctx.fillStyle = '#111111';
+              ctx.fillRect(px - 4, ay - 5, 8, 2);
+              ctx.fillRect(px - 3, ay - 3, 6, 2);
+              ctx.fillRect(px - 2, ay - 1, 4, 1);
+              ctx.fillRect(px - 1, ay, 2, 1);
               ctx.fillStyle = col;
-              ctx.fillRect(px - 2, ay, 5, 1);
-              ctx.fillRect(px - 1, ay + 1, 3, 1);
-              ctx.fillRect(px, ay + 2, 1, 1);
+              ctx.fillRect(px - 3, ay - 4, 6, 1);
+              ctx.fillRect(px - 2, ay - 3, 4, 2);
+              ctx.fillRect(px - 1, ay - 1, 2, 1);
             }
 
+            // Crisp Pixel Nameplate
             if (isCarrier || isP1) {
-              const lbl = `${pl.data.num}. ${pl.data.name.toUpperCase()}`;
-              ctx.font = 'bold 6px monospace';
+              const lbl = `${pl.data.num}. ${pl.data.name}`;
+              ctx.font = '700 6px Silkscreen, monospace';
               ctx.textAlign = 'center';
-              ctx.fillStyle = '#0b0f17';
-              ctx.fillText(lbl, px + 1, py - 34);
-              ctx.fillText(lbl, px - 1, py - 34);
-              ctx.fillText(lbl, px, py - 35);
+              ctx.lineWidth = 2;
+              ctx.strokeStyle = '#090d16';
+              ctx.strokeText(lbl, px, Math.round(py - 40 * sc));
               ctx.fillStyle = '#ffffff';
-              ctx.fillText(lbl, px, py - 34);
+              ctx.fillText(lbl, px, Math.round(py - 40 * sc));
               ctx.textAlign = 'left';
             }
           }
         });
-      });
+      }
 
       drawables.push({ y: activeBall.y + 0.5, fn: drawBall });
       drawables.sort((a, b) => a.y - b.y);
-      drawables.forEach((d) => d.fn());
+      for (const d of drawables) d.fn();
 
-      g.particles.forEach((pt) => {
+      // Pixel Square Turf/Dust/Confetti Particles
+      for (const pt of g.particles) {
         const s = worldToScreen(pt.x, pt.y, pt.z, camOverride);
+        const psz = Math.max(2, Math.round(pt.size * 0.65));
         ctx.fillStyle = pt.color;
         ctx.globalAlpha = Math.max(0, Math.min(1, pt.life / pt.maxLife));
-        ctx.fillRect(Math.round(s.x), Math.round(s.y), pt.size, pt.size);
-      });
+        ctx.fillRect(s.x - Math.floor(psz / 2), s.y - Math.floor(psz / 2), psz, psz);
+      }
       ctx.globalAlpha = 1;
 
-      // Weather Effects Overlay: Night floodlight vignette or Light Rain streaks
       if (weather === 'night') {
-        const grad = ctx.createRadialGradient(240, 145, 75, 240, 145, 290);
+        const grad = ctx.createRadialGradient(CANVAS_W * 0.5, CANVAS_H * 0.52, 90, CANVAS_W * 0.5, CANVAS_H * 0.52, 370);
         grad.addColorStop(0, 'rgba(255, 255, 230, 0.03)');
-        grad.addColorStop(1, 'rgba(5, 12, 24, 0.42)');
+        grad.addColorStop(1, 'rgba(4, 10, 22, 0.42)');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 480, 270);
+        ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
       } else if (weather === 'rain') {
-        ctx.strokeStyle = 'rgba(203, 213, 225, 0.34)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        g.rainDrops.forEach((rd) => {
-          ctx.moveTo(Math.round(rd.x), Math.round(rd.y));
-          ctx.lineTo(Math.round(rd.x - 3), Math.round(rd.y + 9));
-        });
-        ctx.stroke();
+        for (const rd of g.rainDrops) {
+          plotPixelLine(rd.x, rd.y, rd.x - 3, rd.y + 10, 'rgba(203, 213, 225, 0.36)', 1);
+        }
       }
 
-      // Yellow / Red Card Toast Banner
+      // Yellow / Red Card Toast Pixel Banner
       if (g.cardBanner && g.state !== 'REPLAY') {
-        ctx.fillStyle = 'rgba(9, 15, 24, 0.92)';
-        ctx.fillRect(156, 46, 168, 26);
+        ctx.fillStyle = 'rgba(9, 15, 24, 0.94)';
+        ctx.fillRect(195, 56, 250, 32);
         ctx.strokeStyle = g.cardBanner.color === 'red' ? '#ef4444' : '#facc15';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(156, 46, 168, 26);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(195, 56, 250, 32);
+
         ctx.fillStyle = g.cardBanner.color === 'red' ? '#ef4444' : '#facc15';
-        ctx.fillRect(164, 52, 8, 13);
+        ctx.fillRect(204, 62, 12, 20);
+
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 7px monospace';
+        ctx.font = '700 8px Silkscreen, monospace';
         ctx.fillText(
           `${g.cardBanner.color === 'red' ? 'EXPULSO' : 'AMARELO'}: ${g.cardBanner.playerName} (${g.cardBanner.abbr})`,
-          178,
-          61
+          224,
+          75
         );
       }
 
+      // Goal / Event Pixel Banner
       if (g.bannerTimer > 0 && g.state !== 'REPLAY' && g.state !== 'PRE_MATCH') {
-        const bw = 246;
-        const bh = 38;
-        const bx = 240 - bw / 2;
-        const by = 52;
-        ctx.fillStyle = 'rgba(9, 15, 24, 0.9)';
+        const bw = 310;
+        const bh = 48;
+        const bx = Math.round(CANVAS_W * 0.5 - bw * 0.5);
+        const by = 68;
+        ctx.fillStyle = 'rgba(9, 15, 24, 0.92)';
         ctx.fillRect(bx, by, bw, bh);
         ctx.strokeStyle = '#facc15';
         ctx.lineWidth = 2;
-        ctx.strokeRect(bx + 1, by + 1, bw - 2, bh - 2);
+        ctx.strokeRect(bx, by, bw, bh);
+
         ctx.textAlign = 'center';
         ctx.fillStyle = '#facc15';
-        ctx.font = 'bold 13px monospace';
-        ctx.fillText(g.bannerText, 240, by + 18);
+        ctx.font = '700 16px Silkscreen, monospace';
+        ctx.fillText(g.bannerText, CANVAS_W * 0.5, by + 23);
         ctx.fillStyle = '#f8fafc';
-        ctx.font = 'bold 7px monospace';
-        ctx.fillText(g.bannerSub, 240, by + 30);
+        ctx.font = '700 8px Silkscreen, monospace';
+        ctx.fillText(g.bannerSub, CANVAS_W * 0.5, by + 38, bw - 16);
         ctx.textAlign = 'left';
       }
 
       ctx.restore();
 
-      // Tactical Radar Minimap
+      // Pixel-Art Tactical Radar Minimap
       const rc = radarRef.current;
       if (rc) {
         const rctx = rc.getContext('2d');
         if (rctx) {
-          rctx.fillStyle = '#256c47';
+          rctx.imageSmoothingEnabled = false;
+          rctx.clearRect(0, 0, rc.width, rc.height);
+          rctx.fillStyle = '#15803d';
           rctx.fillRect(0, 0, rc.width, rc.height);
-          rctx.strokeStyle = 'rgba(230, 250, 240, 0.75)';
-          rctx.lineWidth = 1;
-          rctx.strokeRect(2, 2, rc.width - 4, rc.height - 4);
-          rctx.beginPath();
-          rctx.moveTo(rc.width / 2, 2);
-          rctx.lineTo(rc.width / 2, rc.height - 2);
-          rctx.stroke();
-          rctx.strokeRect(2, 13, 14, rc.height - 26);
-          rctx.strokeRect(rc.width - 16, 13, 14, rc.height - 26);
+          rctx.fillStyle = '#166534';
+          for (let sx = 0; sx < rc.width; sx += 20) {
+            rctx.fillRect(sx, 0, 10, rc.height);
+          }
 
-          g.players.forEach((pl) => {
+          rctx.strokeStyle = 'rgba(240, 253, 244, 0.85)';
+          rctx.lineWidth = 1;
+          rctx.strokeRect(3.5, 3.5, rc.width - 7, rc.height - 7);
+          rctx.beginPath();
+          rctx.moveTo(Math.round(rc.width / 2) + 0.5, 4);
+          rctx.lineTo(Math.round(rc.width / 2) + 0.5, rc.height - 4);
+          rctx.stroke();
+          rctx.strokeRect(Math.round(rc.width / 2) - 9, Math.round(rc.height / 2) - 9, 18, 18);
+          rctx.strokeRect(3.5, 16.5, 18, rc.height - 33);
+          rctx.strokeRect(rc.width - 21.5, 16.5, 18, rc.height - 33);
+
+          for (const pl of g.players) {
             const sp = snap ? snap.players.find((x) => x.id === pl.id) : null;
-            if (sp ? sp.ejected : pl.ejected) return;
+            if (sp ? sp.ejected : pl.ejected) continue;
             const px = sp ? sp.x : pl.x;
             const py = sp ? sp.y : pl.y;
-            const rx = ((px + PITCH.halfW) / (PITCH.halfW * 2)) * (rc.width - 8) + 4;
-            const ry = ((py + PITCH.halfH) / (PITCH.halfH * 2)) * (rc.height - 8) + 4;
-            rctx.fillStyle = pl.side === 'home' ? '#ef4444' : '#3b82f6';
-            rctx.fillRect(Math.round(rx) - 1, Math.round(ry) - 1, 3, 3);
-          });
+            const rx = Math.round(((px + PITCH.halfW) / (PITCH.halfW * 2)) * (rc.width - 12) + 6);
+            const ry = Math.round(((py + PITCH.halfH) / (PITCH.halfH * 2)) * (rc.height - 12) + 6);
+            rctx.fillStyle = '#090d16';
+            rctx.fillRect(rx - 3, ry - 3, 6, 6);
+            rctx.fillStyle = pl.side === 'home' ? '#38bdf8' : '#ef4444';
+            rctx.fillRect(rx - 2, ry - 2, 4, 4);
+          }
 
-          const brx = ((activeBall.x + PITCH.halfW) / (PITCH.halfW * 2)) * (rc.width - 8) + 4;
-          const bry = ((activeBall.y + PITCH.halfH) / (PITCH.halfH * 2)) * (rc.height - 8) + 4;
+          const brx = Math.round(((activeBall.x + PITCH.halfW) / (PITCH.halfW * 2)) * (rc.width - 12) + 6);
+          const bry = Math.round(((activeBall.y + PITCH.halfH) / (PITCH.halfH * 2)) * (rc.height - 12) + 6);
+          rctx.fillStyle = '#090d16';
+          rctx.fillRect(brx - 3, bry - 3, 6, 6);
           rctx.fillStyle = '#ffffff';
-          rctx.fillRect(Math.round(brx) - 2, Math.round(bry) - 2, 3, 3);
+          rctx.fillRect(brx - 2, bry - 2, 4, 4);
         }
       }
     };
@@ -2505,7 +2993,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         setHudState({
           homeScore: g.homeScore,
           awayScore: g.awayScore,
-          clockText: isTraining ? 'TREINO' : `${mm}:${ss}`,
+          clockText: isTraining ? 'TREINO' : `${mm} : ${ss}`,
           p1Name: p1 ? p1.data.name : '',
           p1Num: p1 ? p1.data.num : 10,
           p1Role: p1 ? p1.data.role : 'ATA',
@@ -2518,6 +3006,16 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           p2Stamina: Math.round(p2 ? p2.stamina : 100),
           setPieceHint: hint
         });
+
+        if (isTraining) {
+          setTrainingHud({
+            points: g.training.points,
+            streak: g.training.streak,
+            attempts: g.training.attempts,
+            goals: g.training.goals,
+            penHistory: [...g.training.penHistory]
+          });
+        }
 
         setSquadSnapshot(
           g.players
@@ -2559,65 +3057,131 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
   };
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-[#0f261c] overflow-hidden">
+    <div className="relative w-full h-full flex items-center justify-center bg-[#07130d] overflow-hidden">
       <canvas
         ref={canvasRef}
-        width={480}
-        height={270}
-        className="block w-full h-full max-w-[177.78vh] max-h-[56.25vw] shadow-2xl"
-        style={{ imageRendering: 'pixelated' }}
+        width={CANVAS_W}
+        height={CANVAS_H}
+        className="block w-full h-full max-w-[177.78vh] max-h-[56.25vw] shadow-2xl pixelated"
       />
 
-      {/* FIFA / EA FC Broadcast HUD Overlay */}
-      <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-2.5 sm:p-3 z-10">
-        {/* Top Bar: Left TV Broadcast Scoreboard | Center Commentary | Right Controls & Replay */}
-        <div className="flex items-start justify-between gap-2">
-          {/* Top-Left FIFA-Style TV Scoreboard */}
-          <div className="flex flex-col items-start gap-1">
-            <div className="flex items-center bg-slate-950/92 border border-white/20 rounded-md overflow-hidden shadow-xl tabular-nums">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900">
-                <canvas ref={homeCrestRef} width={16} height={16} className="w-4 h-4" style={{ imageRendering: 'pixelated' }} />
-                <canvas ref={homeJerseyRef} width={18} height={16} className="w-4 h-4" style={{ imageRendering: 'pixelated' }} />
-                <span className="font-mono text-xs sm:text-sm font-extrabold text-white">{config.homeTeam.abbr}</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-700 font-mono text-sm sm:text-base font-extrabold text-white">
-                <span>{hudState.homeScore}</span>
-                <span className="text-emerald-200">-</span>
-                <span>{hudState.awayScore}</span>
-              </div>
-
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-900">
-                <span className="font-mono text-xs sm:text-sm font-extrabold text-white">{config.awayTeam.abbr}</span>
-                <canvas ref={awayJerseyRef} width={18} height={16} className="w-4 h-4" style={{ imageRendering: 'pixelated' }} />
-                <canvas ref={awayCrestRef} width={16} height={16} className="w-4 h-4" style={{ imageRendering: 'pixelated' }} />
-              </div>
-
-              <div className="px-2.5 py-1 bg-slate-950 border-l border-white/15 font-mono text-xs sm:text-sm font-extrabold text-yellow-400">
-                {hudState.clockText}
-              </div>
-            </div>
-
-            {/* Live Portuguese Commentary Ticker */}
-            <div className="bg-slate-950/82 border border-white/15 rounded px-2.5 py-0.5 text-[11px] font-bold text-yellow-300 shadow max-w-sm truncate">
+      {/* Pixel Cup Soccer Inspired Broadcast HUD Overlay */}
+      <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-2.5 sm:p-4 z-10">
+        <div className="relative flex items-start justify-between gap-2">
+          {/* Top-Left Commentary & Training Controls */}
+          <div className="flex flex-col items-start gap-1.5 mt-14 lg:mt-0 max-w-[230px] xl:max-w-[290px]">
+            <div className="bg-slate-950/88 border-2 border-slate-900 rounded-lg px-2.5 py-1 text-[11px] font-semibold text-amber-200 shadow-lg truncate max-w-full">
               {commentary}
             </div>
 
             {hudState.setPieceHint && (
-              <div className="bg-yellow-400 text-slate-950 rounded px-2.5 py-0.5 text-[11px] font-extrabold shadow">
+              <div className="bg-amber-400 text-slate-950 border-2 border-slate-950 rounded-lg px-2.5 py-1 text-[11px] font-extrabold shadow-lg">
                 {hudState.setPieceHint}
+              </div>
+            )}
+
+            {/* Interactive Training Arena Challenge Selector */}
+            {config.mode === 'training' && (
+              <div className="pointer-events-auto flex flex-wrap items-center gap-1 bg-slate-950/92 border-2 border-slate-900 rounded-xl p-1.5 shadow-xl">
+                {(
+                  [
+                    ['free', 'Livre'],
+                    ['free_kicks', 'Faltas'],
+                    ['penalties', 'Pênaltis'],
+                    ['finishing_cross', 'Cruzamentos']
+                  ] as const
+                ).map(([tId, tLabel]) => (
+                  <button
+                    key={tId}
+                    type="button"
+                    onClick={() => {
+                      setTrainingMode(tId);
+                      trainingModeRef.current = tId;
+                      resetTrainingRef.current = true;
+                    }}
+                    className={`min-h-[28px] px-2 rounded-lg text-[10px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition ${
+                      trainingMode === tId
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
+                    }`}
+                  >
+                    {tLabel}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetTrainingRef.current = true;
+                  }}
+                  className="min-h-[28px] px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-300 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Reiniciar
+                </button>
+                {trainingMode !== 'free' && (
+                  <div className="flex items-center gap-2 px-1.5 text-[10px] font-mono font-bold text-slate-200 tabular-nums border-l border-white/15">
+                    <span className="text-amber-300">{trainingHud.points} pts</span>
+                    <span>{trainingHud.streak}x</span>
+                    {trainingMode === 'penalties' ? (
+                      <span className="flex items-center gap-1">
+                        {Array.from({ length: 5 }).map((_, i) => {
+                          const res = trainingHud.penHistory[i];
+                          return (
+                            <span
+                              key={i}
+                              className={`w-2 h-2 rounded-full inline-block ${
+                                res === 'goal' ? 'bg-emerald-400' : res === 'miss' ? 'bg-rose-500' : 'bg-slate-700'
+                              }`}
+                            />
+                          );
+                        })}
+                      </span>
+                    ) : (
+                      <span>{trainingHud.goals}/{trainingHud.attempts}</span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
+          {/* Top-Center Pixel Cup Soccer Pill Scoreboard */}
+          <div className="absolute left-1/2 -translate-x-1/2 top-0 flex flex-col items-center pointer-events-none">
+            <div className="px-3 py-0.5 bg-slate-800/95 border-2 border-b-0 border-slate-950 rounded-t-lg font-pixel text-[10px] sm:text-xs text-white tracking-wider shadow">
+              {hudState.clockText}
+            </div>
+            <div className="flex items-center bg-slate-700/95 border-2 border-slate-950 rounded-full px-1.5 py-0.5 shadow-2xl tabular-nums">
+              <div className="flex items-center gap-1.5 pl-1 pr-2">
+                <canvas ref={homeJerseyRef} width={36} height={36} className="pixelated w-5 h-5 sm:w-6 sm:h-6" />
+                <canvas ref={homeCrestRef} width={48} height={48} className="pixelated w-5 h-5 sm:w-6 sm:h-6" />
+                <span className="font-pixel text-[11px] sm:text-sm text-white drop-shadow-[0_1px_0_#000]">
+                  {config.homeTeam.abbr}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1.5 px-3 py-0.5 bg-[#8b2c2c] border-2 border-slate-950 rounded-full font-pixel text-sm sm:text-base text-white drop-shadow-[0_1px_0_#000]">
+                <span>{hudState.homeScore}</span>
+                <span className="text-rose-200">-</span>
+                <span>{hudState.awayScore}</span>
+              </div>
+
+              <div className="flex items-center gap-1.5 pr-1 pl-2">
+                <span className="font-pixel text-[11px] sm:text-sm text-white drop-shadow-[0_1px_0_#000]">
+                  {config.awayTeam.abbr}
+                </span>
+                <canvas ref={awayCrestRef} width={48} height={48} className="pixelated w-5 h-5 sm:w-6 sm:h-6" />
+                <canvas ref={awayJerseyRef} width={36} height={36} className="pixelated w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+            </div>
+          </div>
+
           {/* Top-Right TV Watermark & Controls */}
-          <div className="flex flex-wrap items-center justify-end gap-1.5 pointer-events-auto">
+          <div className="flex flex-wrap items-center justify-end gap-1.5 pointer-events-auto mt-14 lg:mt-0">
             {isReplay ? (
-              <div className="flex items-center gap-2 bg-red-700/95 border border-white/40 rounded px-2.5 py-1 text-xs font-extrabold text-white shadow">
-                <span>BRASIL TV ● REPLAY</span>
+              <div className="flex items-center gap-2 bg-rose-600/95 border-2 border-white/40 rounded-lg px-2.5 py-1 text-[11px] font-pixel text-white shadow-lg">
+                <span>BRFC ● REPLAY</span>
               </div>
             ) : (
-              <div className="hidden sm:block text-[10px] font-extrabold text-slate-200 bg-slate-950/80 border border-white/15 rounded px-2 py-1">
+              <div className="hidden xl:block text-[10px] font-bold text-slate-200 bg-slate-950/85 border-2 border-slate-900 rounded-lg px-2.5 py-1">
                 {config.mode === 'training' ? 'Treino' : `${DIFFICULTIES[config.difficulty].label} · ${WEATHER_LABELS[weather]}`}
               </div>
             )}
@@ -2627,7 +3191,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 onClick={() => {
                   skipReplayRef.current = true;
                 }}
-                className="min-h-[32px] px-2.5 rounded border border-yellow-300 bg-yellow-400 text-xs font-extrabold text-slate-950 cursor-pointer"
+                className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-950 bg-amber-400 text-[11px] font-extrabold text-slate-950 cursor-pointer shadow"
               >
                 Pular Replay
               </button>
@@ -2635,14 +3199,14 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             <button
               type="button"
               onClick={() => setVoiceOn(Narrator.setVoiceEnabled(!Narrator.isVoiceEnabled()))}
-              className="min-h-[32px] px-2.5 rounded border border-white/20 bg-slate-950/85 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
+              className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
             >
               {voiceOn ? 'Voz: ON' : 'Voz: OFF'}
             </button>
             <button
               type="button"
               onClick={() => setMuted(AudioFX.setMuted(!AudioFX.isMuted()))}
-              className="min-h-[32px] px-2.5 rounded border border-white/20 bg-slate-950/85 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
+              className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
             >
               {muted ? 'Som: OFF' : 'Som: ON'}
             </button>
@@ -2652,134 +3216,153 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 setPauseTab('menu');
                 setPaused((p) => !p);
               }}
-              className="min-h-[32px] px-2.5 rounded border border-white/20 bg-slate-950/85 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
+              className="min-h-[30px] px-2.5 rounded-lg border-2 border-slate-900 bg-slate-950/90 text-[11px] font-bold text-slate-100 hover:bg-slate-800 cursor-pointer"
             >
               Pausa
             </button>
           </div>
         </div>
 
-        {/* Bottom Broadcast Strip: P1 Bars & Name | Radar | P2 Bars & Name */}
-        <div className="flex items-end justify-between gap-3">
-          <div className="flex flex-col gap-1">
+        {/* Bottom Pixel Cup Soccer Strip: P1 Gauges | Pixel Radar | P2 Gauges */}
+        <div className="flex items-end justify-between gap-2 sm:gap-4">
+          <div className="flex flex-col gap-1 bg-slate-950/80 border-2 border-slate-900 rounded-lg px-2.5 py-1.5 shadow-xl">
             <div className="flex items-center gap-1.5">
-              <div className="w-24 h-3 bg-[#473f3d] border-2 border-slate-950 rounded-xs overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-400 via-yellow-400 to-red-500"
-                  style={{ width: `${hudState.p1Power}%` }}
-                />
+              <div className="grid grid-cols-8 gap-0.5 w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+                {Array.from({ length: 8 }).map((_, idx) => {
+                  const active = hudState.p1Power >= (idx + 1) * 12.5;
+                  return (
+                    <span
+                      key={idx}
+                      className={
+                        active
+                          ? idx >= 6
+                            ? 'bg-rose-500'
+                            : idx >= 4
+                            ? 'bg-amber-400'
+                            : 'bg-emerald-400'
+                          : 'bg-slate-700/60'
+                      }
+                    />
+                  );
+                })}
               </div>
-              <span className="text-[10px] font-bold text-slate-200 bg-slate-950/70 px-1 rounded">CHUTE</span>
+              <span className="font-pixel text-[9px] text-amber-300">CHUTE</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-24 h-3 bg-[#1e293b] border-2 border-slate-950 rounded-xs overflow-hidden">
-                <div className="h-full bg-cyan-400" style={{ width: `${hudState.p1Stamina}%` }} />
+              <div className="w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+                <div className="h-full bg-cyan-400 transition-all duration-75" style={{ width: `${hudState.p1Stamina}%` }} />
               </div>
-              <span className="text-[10px] font-bold text-cyan-300 bg-slate-950/70 px-1 rounded">FÔLEGO</span>
+              <span className="font-pixel text-[9px] text-cyan-300">FÔLEGO</span>
             </div>
-            <div
-              className="font-mono text-xs sm:text-sm font-extrabold text-white tracking-wide tabular-nums"
-              style={{ textShadow: '2px 2px 0 #000' }}
-            >
-              {hudState.p1Num}. {hudState.p1Name.toUpperCase()} .{hudState.p1Role}
+            <div className="font-pixel text-[10px] sm:text-xs text-white tracking-wide drop-shadow-[0_1px_0_#000] tabular-nums">
+              {hudState.p1Num}. {hudState.p1Name.toUpperCase()} <span className="text-cyan-300">.{hudState.p1Role.slice(0, 2)}</span>
             </div>
           </div>
 
           <canvas
             ref={radarRef}
-            width={122}
-            height={58}
-            className="border-2 border-white/60 rounded-xs shadow-lg"
-            style={{ imageRendering: 'pixelated' }}
+            width={160}
+            height={76}
+            className="pixelated w-[148px] h-[70px] sm:w-[196px] sm:h-[92px] border-2 border-white/65 rounded bg-emerald-900 shadow-2xl"
           />
 
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-col items-end gap-1 bg-slate-950/80 border-2 border-slate-900 rounded-lg px-2.5 py-1.5 shadow-xl">
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-slate-200 bg-slate-950/70 px-1 rounded">CHUTE</span>
-              <div className="w-24 h-3 bg-[#473f3d] border-2 border-slate-950 rounded-xs overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-400 via-yellow-400 to-red-500"
-                  style={{ width: `${hudState.p2Power}%` }}
-                />
+              <span className="font-pixel text-[9px] text-amber-300">CHUTE</span>
+              <div className="grid grid-cols-8 gap-0.5 w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+                {Array.from({ length: 8 }).map((_, idx) => {
+                  const active = hudState.p2Power >= (idx + 1) * 12.5;
+                  return (
+                    <span
+                      key={idx}
+                      className={
+                        active
+                          ? idx >= 6
+                            ? 'bg-rose-500'
+                            : idx >= 4
+                            ? 'bg-amber-400'
+                            : 'bg-emerald-400'
+                          : 'bg-slate-700/60'
+                      }
+                    />
+                  );
+                })}
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-bold text-cyan-300 bg-slate-950/70 px-1 rounded">FÔLEGO</span>
-              <div className="w-24 h-3 bg-[#1e293b] border-2 border-slate-950 rounded-xs overflow-hidden">
-                <div className="h-full bg-cyan-400" style={{ width: `${hudState.p2Stamina}%` }} />
+              <span className="font-pixel text-[9px] text-rose-300">FÔLEGO</span>
+              <div className="w-24 sm:w-28 h-2.5 bg-slate-900 p-0.5 border border-slate-950">
+                <div className="h-full bg-rose-400 transition-all duration-75" style={{ width: `${hudState.p2Stamina}%` }} />
               </div>
             </div>
-            <div
-              className="font-mono text-xs sm:text-sm font-extrabold text-white tracking-wide tabular-nums"
-              style={{ textShadow: '2px 2px 0 #000' }}
-            >
-              {hudState.p2Num}. {hudState.p2Name.toUpperCase()} .{hudState.p2Role}
+            <div className="font-pixel text-[10px] sm:text-xs text-white tracking-wide drop-shadow-[0_1px_0_#000] tabular-nums">
+              {hudState.p2Num}. {hudState.p2Name.toUpperCase()} <span className="text-rose-300">.{hudState.p2Role.slice(0, 2)}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* FIFA TV Pre-Match Lineup Presentation Overlay */}
+      {/* Broadcast Pre-Match Lineup Presentation Overlay */}
       {isPreMatch && (
-        <div className="absolute inset-0 bg-slate-950/72 z-20 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-slate-950/95 border border-yellow-400/40 rounded-xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-              <span className="text-[11px] font-extrabold uppercase tracking-wider text-yellow-400">
-                Transmissão Oficial · Escalações Confirmadas
+        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-sm z-20 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-slate-950/95 border border-amber-400/35 rounded-2xl p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <span className="font-display text-xs font-extrabold uppercase tracking-wider text-amber-400">
+                BRFC · Escalações Confirmadas
               </span>
-              <span className="text-[11px] font-bold text-slate-300">{WEATHER_LABELS[weather]}</span>
+              <span className="text-xs font-semibold text-slate-300">{WEATHER_LABELS[weather]}</span>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
-              <div className="bg-slate-900/90 border border-white/10 rounded-lg p-3 space-y-2">
-                <div className="flex items-center gap-2 border-b border-white/10 pb-1.5">
-                  <ClubCrest team={config.homeTeam} className="w-6 h-6" />
+              <div className="bg-slate-900/90 border border-white/10 rounded-xl p-3.5 space-y-2.5">
+                <div className="flex items-center gap-2.5 border-b border-white/10 pb-2">
+                  <ClubCrest team={config.homeTeam} className="w-7 h-7" />
                   <div>
                     <div className="text-sm font-extrabold text-white">{config.homeTeam.name}</div>
-                    <div className="text-[10px] font-bold text-emerald-400">Esquema {formation}</div>
+                    <div className="text-[11px] font-bold text-emerald-400">Esquema {formation}</div>
                   </div>
                 </div>
-                <div className="space-y-1 text-xs">
+                <div className="space-y-1.5 text-xs">
                   {config.homeTeam.players.map((pl) => (
                     <div key={pl.num + pl.name} className="flex justify-between text-slate-200">
                       <span>
-                        <strong className="text-yellow-400 font-mono">#{pl.num}</strong> {pl.name}
+                        <strong className="text-amber-400 font-mono">#{pl.num}</strong> {pl.name}
                       </span>
-                      <span className="text-[10px] text-slate-400 font-mono">{pl.role}</span>
+                      <span className="text-[11px] text-slate-400 font-mono">{pl.role}</span>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="bg-slate-900/90 border border-white/10 rounded-lg p-3 space-y-2">
-                <div className="flex items-center gap-2 border-b border-white/10 pb-1.5">
-                  <ClubCrest team={config.awayTeam} className="w-6 h-6" />
+              <div className="bg-slate-900/90 border border-white/10 rounded-xl p-3.5 space-y-2.5">
+                <div className="flex items-center gap-2.5 border-b border-white/10 pb-2">
+                  <ClubCrest team={config.awayTeam} className="w-7 h-7" />
                   <div>
                     <div className="text-sm font-extrabold text-white">{config.awayTeam.name}</div>
-                    <div className="text-[10px] font-bold text-rose-400">Esquema 4-3-3</div>
+                    <div className="text-[11px] font-bold text-rose-400">Esquema 4-3-3</div>
                   </div>
                 </div>
-                <div className="space-y-1 text-xs">
+                <div className="space-y-1.5 text-xs">
                   {config.awayTeam.players.map((pl) => (
                     <div key={pl.num + pl.name} className="flex justify-between text-slate-200">
                       <span>
-                        <strong className="text-yellow-400 font-mono">#{pl.num}</strong> {pl.name}
+                        <strong className="text-amber-400 font-mono">#{pl.num}</strong> {pl.name}
                       </span>
-                      <span className="text-[10px] text-slate-400 font-mono">{pl.role}</span>
+                      <span className="text-[11px] text-slate-400 font-mono">{pl.role}</span>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Pressione Espaço ou K para iniciar agora</span>
+            <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
+              <span>Pressione Espaço ou K para dar a saída</span>
               <button
                 type="button"
                 onClick={() => {
                   skipPreMatchRef.current = true;
                 }}
-                className="min-h-[36px] px-4 rounded bg-emerald-600 hover:bg-emerald-500 text-xs font-extrabold text-white cursor-pointer"
+                className="min-h-[38px] px-5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-extrabold text-white cursor-pointer"
               >
                 Iniciar Partida →
               </button>
@@ -2788,20 +3371,20 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         </div>
       )}
 
-      {/* Pause & Gerenciamento de Elenco Modal */}
+      {/* Pause & Squad Management Modal */}
       {paused && (
-        <div className="absolute inset-0 bg-black/75 z-30 flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-slate-950 border border-white/15 rounded-xl p-5 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
+        <div className="absolute inset-0 bg-black/75 backdrop-blur-sm z-30 flex items-center justify-center p-4">
+          <div className="w-full max-w-2xl bg-slate-950 border border-white/15 rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-3">
-              <h2 className="text-xl font-extrabold text-yellow-400">
+              <h2 className="font-display text-xl font-black text-amber-400">
                 {pauseTab === 'menu' ? 'Jogo Pausado' : `Gerenciamento de Elenco · ${config.homeTeam.abbr}`}
               </h2>
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => setPauseTab('menu')}
-                  className={`min-h-[34px] px-3 rounded text-xs font-bold cursor-pointer ${
-                    pauseTab === 'menu' ? 'bg-yellow-400 text-slate-950' : 'bg-slate-800 text-slate-200'
+                  className={`min-h-[34px] px-3.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    pauseTab === 'menu' ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-200'
                   }`}
                 >
                   Resumo & Controles
@@ -2809,8 +3392,8 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 <button
                   type="button"
                   onClick={() => setPauseTab('squad')}
-                  className={`min-h-[34px] px-3 rounded text-xs font-bold cursor-pointer ${
-                    pauseTab === 'squad' ? 'bg-yellow-400 text-slate-950' : 'bg-slate-800 text-slate-200'
+                  className={`min-h-[34px] px-3.5 rounded-lg text-xs font-bold cursor-pointer ${
+                    pauseTab === 'squad' ? 'bg-amber-400 text-slate-950' : 'bg-slate-800 text-slate-200'
                   }`}
                 >
                   Gerenciamento de Elenco
@@ -2820,29 +3403,29 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
             {pauseTab === 'menu' ? (
               <div className="space-y-4 text-left">
-                <div className="bg-slate-900/80 border border-white/10 rounded-lg p-3.5 space-y-1.5 text-xs text-slate-300">
-                  <div className="font-extrabold text-white uppercase mb-1">Comandos da Simulação</div>
+                <div className="bg-slate-900/80 border border-white/10 rounded-xl p-4 space-y-2 text-xs text-slate-300">
+                  <div className="font-display font-extrabold text-white uppercase mb-1">Comandos da Partida</div>
                   <div>
-                    <strong className="text-yellow-400">WASD / Setas:</strong> Movimentar jogador
+                    <strong className="text-amber-400">WASD / Setas:</strong> Movimentar jogador
                   </div>
                   <div>
-                    <strong className="text-yellow-400">Shift:</strong> Trocar marcador (sem posse) / Sprint (segurar correndo)
+                    <strong className="text-amber-400">Shift:</strong> Trocar marcador (sem posse) / Sprint (segurar correndo)
                   </div>
                   <div>
-                    <strong className="text-yellow-400">J:</strong> Passe rasteiro curto · <strong className="text-yellow-400">H:</strong> Passe em profundidade (enfiada)
+                    <strong className="text-amber-400">J:</strong> Passe rasteiro curto · <strong className="text-amber-400">H:</strong> Passe em profundidade (enfiada)
                   </div>
                   <div>
-                    <strong className="text-yellow-400">L:</strong> Cruzamento / Lançamento alto · <strong className="text-yellow-400">Espaço:</strong> Proteger bola / Corte de corpo
+                    <strong className="text-amber-400">L:</strong> Cruzamento / Lançamento alto · <strong className="text-amber-400">Espaço:</strong> Proteger bola / Corte de corpo
                   </div>
                   <div>
-                    <strong className="text-yellow-400">K:</strong> Chute colocado/potente (segure) · Carrinho (sem posse) · Voleio (bola no ar)
+                    <strong className="text-amber-400">K:</strong> Chute colocado/potente (segure) · Carrinho (sem posse) · Voleio (bola no ar)
                   </div>
                 </div>
               </div>
             ) : (
               <div className="space-y-4 text-left">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="bg-slate-900/70 border border-white/10 rounded-lg p-3 space-y-2">
+                  <div className="bg-slate-900/70 border border-white/10 rounded-xl p-3 space-y-2">
                     <div className="text-[11px] font-extrabold uppercase text-slate-400">Esquema Tático</div>
                     <div className="grid grid-cols-4 gap-1.5">
                       {(['4-3-3', '4-4-2', '4-2-3-1', '3-5-2'] as FormationId[]).map((f) => (
@@ -2850,9 +3433,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                           key={f}
                           type="button"
                           onClick={() => setFormation(f)}
-                          className={`min-h-[34px] rounded border text-xs font-bold cursor-pointer ${
+                          className={`min-h-[34px] rounded-lg border text-xs font-bold cursor-pointer ${
                             formation === f
-                              ? 'bg-emerald-600 border-yellow-400 text-white'
+                              ? 'bg-emerald-600 border-amber-400 text-white'
                               : 'bg-slate-950 border-white/10 text-slate-300'
                           }`}
                         >
@@ -2862,7 +3445,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                     </div>
                   </div>
 
-                  <div className="bg-slate-900/70 border border-white/10 rounded-lg p-3 space-y-2">
+                  <div className="bg-slate-900/70 border border-white/10 rounded-xl p-3 space-y-2">
                     <div className="text-[11px] font-extrabold uppercase text-slate-400">Mentalidade</div>
                     <div className="grid grid-cols-3 gap-1.5">
                       {(
@@ -2876,9 +3459,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                           key={mId}
                           type="button"
                           onClick={() => setMentality(mId)}
-                          className={`min-h-[34px] rounded border text-[11px] font-bold cursor-pointer ${
+                          className={`min-h-[34px] rounded-lg border text-[11px] font-bold cursor-pointer ${
                             mentality === mId
-                              ? 'bg-emerald-600 border-yellow-400 text-white'
+                              ? 'bg-emerald-600 border-amber-400 text-white'
                               : 'bg-slate-950 border-white/10 text-slate-300'
                           }`}
                         >
@@ -2889,13 +3472,12 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                   </div>
                 </div>
 
-                {/* Substitutions */}
-                <div className="bg-slate-900/70 border border-white/10 rounded-lg p-3 space-y-2.5">
+                <div className="bg-slate-900/70 border border-white/10 rounded-xl p-3 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-extrabold uppercase text-slate-300">
                       Substituições ({subsUsed}/5 usadas)
                     </span>
-                    <span className="text-[11px] text-yellow-400">
+                    <span className="text-[11px] text-amber-400">
                       {selectedSubStarterIdx !== null
                         ? 'Agora clique em um reserva abaixo para entrar'
                         : 'Clique em um titular cansado para substituir'}
@@ -2911,9 +3493,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                           type="button"
                           disabled={pl.ejected || subsUsed >= 5}
                           onClick={() => setSelectedSubStarterIdx(pl.slotIdx)}
-                          className={`w-full px-2.5 py-1.5 rounded border flex items-center justify-between text-xs cursor-pointer disabled:opacity-45 ${
+                          className={`w-full px-2.5 py-1.5 rounded-lg border flex items-center justify-between text-xs cursor-pointer disabled:opacity-45 ${
                             selectedSubStarterIdx === pl.slotIdx
-                              ? 'bg-yellow-400/20 border-yellow-400 text-white'
+                              ? 'bg-amber-400/20 border-amber-400 text-white'
                               : 'bg-slate-950 border-white/10 text-slate-200'
                           }`}
                         >
@@ -2922,7 +3504,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                           </span>
                           <span
                             className={`font-mono text-[11px] font-bold ${
-                              pl.stamina < 45 ? 'text-rose-400' : pl.stamina < 70 ? 'text-yellow-400' : 'text-emerald-400'
+                              pl.stamina < 45 ? 'text-rose-400' : pl.stamina < 70 ? 'text-amber-400' : 'text-emerald-400'
                             }`}
                           >
                             {pl.stamina}%
@@ -2939,12 +3521,12 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                           type="button"
                           disabled={selectedSubStarterIdx === null || subsUsed >= 5}
                           onClick={() => handleSubstitute(bi)}
-                          className="w-full px-2.5 py-1.5 rounded border bg-slate-950 border-white/10 hover:border-emerald-400 disabled:opacity-40 flex items-center justify-between text-xs text-slate-200 cursor-pointer"
+                          className="w-full px-2.5 py-1.5 rounded-lg border bg-slate-950 border-white/10 hover:border-emerald-400 disabled:opacity-40 flex items-center justify-between text-xs text-slate-200 cursor-pointer"
                         >
                           <span className="font-bold truncate">
                             #{b.num} {b.name} ({b.role})
                           </span>
-                          <span className="font-mono text-[11px] text-yellow-400">OVR {b.ovr}</span>
+                          <span className="font-mono text-[11px] text-amber-400">OVR {b.ovr}</span>
                         </button>
                       ))}
                     </div>
@@ -2957,14 +3539,14 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               <button
                 type="button"
                 onClick={() => setPaused(false)}
-                className="min-h-[40px] px-5 rounded bg-emerald-600 hover:bg-emerald-500 text-sm font-bold text-white cursor-pointer"
+                className="min-h-[40px] px-5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-bold text-white cursor-pointer"
               >
                 Continuar Partida
               </button>
               <button
                 type="button"
                 onClick={onExit}
-                className="min-h-[40px] px-5 rounded bg-slate-800 hover:bg-slate-700 border border-white/15 text-sm font-bold text-white cursor-pointer"
+                className="min-h-[40px] px-5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 text-sm font-bold text-white cursor-pointer"
               >
                 Voltar ao Menu
               </button>

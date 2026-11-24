@@ -106,10 +106,12 @@ export interface LeagueSpec {
 }
 
 export type GameMode = 'quick' | 'two_player' | 'training' | 'tournament' | 'career_manager' | 'career_player';
+export type TrainingChallengeId = 'free' | 'free_kicks' | 'penalties' | 'finishing_cross';
 export type TacticId = 'equilibrado' | 'ofensivo' | 'retranca';
 
 export interface MatchConfig {
   mode: GameMode;
+  trainingChallenge?: TrainingChallengeId;
   homeTeam: TeamSpec;
   awayTeam: TeamSpec;
   homeUseAway: boolean;
