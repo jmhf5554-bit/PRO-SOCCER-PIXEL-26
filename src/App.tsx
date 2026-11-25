@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioFX } from './audio/sound';
-import { ClubCrest, KitSwatch, PlayerSpritePreview } from './components/ClubPreview';
+import { ClubCrest, PlayerSpritePreview } from './components/ClubPreview';
 import { OfflineIndicator, PWAInstallButton } from './components/PWAPrompt';
+import { TeamPickerModal } from './components/TeamPickerModal';
 import { DIFFICULTIES, LEAGUES, TEAMS, isKitClash } from './data/leagues';
 import { MatchCanvas } from './game/MatchCanvas';
 import { CareerView } from './modes/CareerView';
@@ -144,6 +145,8 @@ export default function App() {
 
   const [activeMatch, setActiveMatch] = useState<MatchConfig | null>(null);
   const [lastResult, setLastResult] = useState<MatchResult | null>(null);
+  const [returnScreen, setReturnScreen] = useState<Screen>('QUICK');
+  const [crestPickerTarget, setCrestPickerTarget] = useState<'home' | 'away' | null>(null);
   const returnScreenRef = useRef<Screen>('QUICK');
   const matchCallbackRef = useRef<((res: MatchResult) => void) | null>(null);
 
@@ -163,6 +166,7 @@ export default function App() {
 
   const launchMatch = (cfg: MatchConfig, fromScreen: Screen, cb?: (res: MatchResult) => void) => {
     returnScreenRef.current = fromScreen;
+    setReturnScreen(fromScreen);
     matchCallbackRef.current = cb || null;
     setActiveMatch(cfg);
     setScreen('PLAYING');
@@ -172,6 +176,10 @@ export default function App() {
     setLastResult(res);
     if (matchCallbackRef.current) {
       matchCallbackRef.current(res);
+    }
+    if (returnScreenRef.current === 'CAREER') {
+      setScreen('CAREER');
+      return;
     }
     setScreen('RESULT');
   };
@@ -183,6 +191,12 @@ export default function App() {
   const keepOnlineAlive =
     screen === 'ONLINE' ||
     ((screen === 'PLAYING' || screen === 'RESULT') && isOnlineMatch);
+  const keepCareerAlive =
+    screen === 'CAREER' ||
+    ((screen === 'PLAYING' || screen === 'RESULT') && returnScreen === 'CAREER');
+  const keepTournamentAlive =
+    screen === 'TOURNAMENT' ||
+    ((screen === 'PLAYING' || screen === 'RESULT') && returnScreen === 'TOURNAMENT');
 
   return (
     <>
@@ -638,11 +652,18 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* HOME */}
               <div className="bg-slate-900/75 border border-white/10 rounded-xl p-3.5 space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-extrabold uppercase text-cyan-300">Mandante (P1)</span>
-                  <div className="flex items-center gap-2">
-                    <ClubCrest team={homeTeam} className="w-6 h-6" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ClubCrest team={homeTeam} className="w-7 h-7" />
                     <span className="text-sm font-extrabold text-white">{homeTeam.name} ({homeTeam.ovr})</span>
+                    <button
+                      type="button"
+                      onClick={() => setCrestPickerTarget('home')}
+                      className="px-2.5 py-1 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-[10px] font-extrabold text-amber-300 cursor-pointer"
+                    >
+                      Escudos
+                    </button>
                     <button
                       type="button"
                       onClick={() => setHomeKitReserve((v) => !v)}
@@ -677,11 +698,11 @@ export default function App() {
                         AudioFX.playSelectBeep(true);
                         setHomeTeamId(t.id);
                       }}
-                      className={`min-h-[40px] px-2.5 rounded-lg border flex items-center gap-2 text-xs font-bold cursor-pointer ${
+                      className={`min-h-[42px] px-2.5 rounded-lg border flex items-center gap-2 text-xs font-bold cursor-pointer ${
                         homeTeamId === t.id ? 'bg-slate-800 border-amber-400 text-white' : 'bg-slate-950 border-white/10 text-slate-300'
                       }`}
                     >
-                      <KitSwatch team={t} useAway={homeTeamId === t.id && homeKitReserve} className="w-5 h-5" />
+                      <ClubCrest team={t} className="w-6 h-6 shrink-0" />
                       <span className="truncate">{t.name}</span>
                       <span className="ml-auto font-mono text-[10px] text-amber-400">{t.ovr}</span>
                     </button>
@@ -700,13 +721,20 @@ export default function App() {
 
               {/* AWAY */}
               <div className="bg-slate-900/75 border border-white/10 rounded-xl p-3.5 space-y-3">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-extrabold uppercase text-rose-300">
                     {quickMode === 'two_player' ? 'Visitante (P2)' : 'Adversário (CPU)'}
                   </span>
-                  <div className="flex items-center gap-2">
-                    <ClubCrest team={awayTeam} className="w-6 h-6" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <ClubCrest team={awayTeam} className="w-7 h-7" />
                     <span className="text-sm font-extrabold text-white">{awayTeam.name} ({awayTeam.ovr})</span>
+                    <button
+                      type="button"
+                      onClick={() => setCrestPickerTarget('away')}
+                      className="px-2.5 py-1 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-[10px] font-extrabold text-amber-300 cursor-pointer"
+                    >
+                      Escudos
+                    </button>
                     <button
                       type="button"
                       onClick={() => setAwayKitReserve((v) => !v)}
@@ -741,11 +769,11 @@ export default function App() {
                         AudioFX.playSelectBeep(true);
                         setAwayTeamId(t.id);
                       }}
-                      className={`min-h-[40px] px-2.5 rounded-lg border flex items-center gap-2 text-xs font-bold cursor-pointer ${
+                      className={`min-h-[42px] px-2.5 rounded-lg border flex items-center gap-2 text-xs font-bold cursor-pointer ${
                         awayTeamId === t.id ? 'bg-slate-800 border-amber-400 text-white' : 'bg-slate-950 border-white/10 text-slate-300'
                       }`}
                     >
-                      <KitSwatch team={t} useAway={awayTeamId === t.id && (awayKitReserve || autoClash)} className="w-5 h-5" />
+                      <ClubCrest team={t} className="w-6 h-6 shrink-0" />
                       <span className="truncate">{t.name}</span>
                       <span className="ml-auto font-mono text-[10px] text-amber-400">{t.ovr}</span>
                     </button>
@@ -823,24 +851,6 @@ export default function App() {
           </div>
         )}
 
-        {/* CAREER MODE */}
-        {screen === 'CAREER' && (
-          <CareerView
-            defaultDifficulty={difficulty}
-            onBack={() => setScreen('HOME')}
-            onStartMatch={(cfg, cb) => launchMatch(cfg, 'CAREER', cb)}
-          />
-        )}
-
-        {/* TOURNAMENTS MODE */}
-        {screen === 'TOURNAMENT' && (
-          <TournamentView
-            defaultDifficulty={difficulty}
-            onBack={() => setScreen('HOME')}
-            onStartMatch={(cfg, cb) => launchMatch(cfg, 'TOURNAMENT', cb)}
-          />
-        )}
-
         {/* MATCH RESULT SUMMARY MODAL */}
         {screen === 'RESULT' && activeMatch && lastResult && (
           <div className="w-full max-w-md mx-auto bg-slate-950/95 backdrop-blur-xl border border-white/15 rounded-2xl p-6 text-center space-y-4 shadow-2xl">
@@ -901,6 +911,38 @@ export default function App() {
         </div>
       )}
 
+      {keepCareerAlive && (
+        <div
+          className={
+            screen === 'CAREER'
+              ? 'fixed inset-0 z-20 flex items-center justify-center p-3 sm:p-6 overflow-y-auto pointer-events-auto'
+              : 'hidden'
+          }
+        >
+          <CareerView
+            defaultDifficulty={difficulty}
+            onBack={() => setScreen('HOME')}
+            onStartMatch={(cfg, cb) => launchMatch(cfg, 'CAREER', cb)}
+          />
+        </div>
+      )}
+
+      {keepTournamentAlive && (
+        <div
+          className={
+            screen === 'TOURNAMENT'
+              ? 'fixed inset-0 z-20 flex items-center justify-center p-3 sm:p-6 overflow-y-auto pointer-events-auto'
+              : 'hidden'
+          }
+        >
+          <TournamentView
+            defaultDifficulty={difficulty}
+            onBack={() => setScreen('HOME')}
+            onStartMatch={(cfg, cb) => launchMatch(cfg, 'TOURNAMENT', cb)}
+          />
+        </div>
+      )}
+
       {keepOnlineAlive && (
         <div
           className={
@@ -917,6 +959,23 @@ export default function App() {
           />
         </div>
       )}
+
+      <TeamPickerModal
+        open={crestPickerTarget !== null}
+        title={crestPickerTarget === 'home' ? 'Escolher Mandante (Escudos)' : 'Escolher Adversário (Escudos)'}
+        selectedTeamId={crestPickerTarget === 'home' ? homeTeam.id : awayTeam.id}
+        initialLeagueId={crestPickerTarget === 'home' ? homeLeague : awayLeague}
+        onSelect={(team, lid) => {
+          if (crestPickerTarget === 'home') {
+            setHomeLeague(lid);
+            setHomeTeamId(team.id);
+          } else if (crestPickerTarget === 'away') {
+            setAwayLeague(lid);
+            setAwayTeamId(team.id);
+          }
+        }}
+        onClose={() => setCrestPickerTarget(null)}
+      />
     </>
   );
 }

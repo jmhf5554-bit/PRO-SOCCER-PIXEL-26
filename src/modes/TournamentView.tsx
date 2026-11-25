@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ChampionshipTrophy, ClubCrest } from '../components/ClubPreview';
+import { TeamPickerModal } from '../components/TeamPickerModal';
 import { DIFFICULTIES, LEAGUES, TEAMS, isKitClash } from '../data/leagues';
 import { DifficultyId, MatchConfig, MatchResult, TeamSpec } from '../types';
 
@@ -151,6 +152,7 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
   const [difficulty, setDifficulty] = useState<DifficultyId>(defaultDifficulty);
   const [userTeamId, setUserTeamId] = useState<string>('flamengo');
   const [started, setStarted] = useState(false);
+  const [crestPickerOpen, setCrestPickerOpen] = useState(false);
 
   // League & Cup State
   const [rounds, setRounds] = useState<Fixture[][]>([]);
@@ -627,8 +629,20 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
         </div>
 
         <div>
-          <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-            Escolha sua Equipe ({compTeams.length} disponíveis · {compMeta.name})
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2.5">
+              <ClubCrest team={userTeam} className="w-7 h-7" />
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Escolha sua Equipe ({compTeams.length} disponíveis · {userTeam.name})
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCrestPickerOpen(true)}
+              className="min-h-[34px] px-3 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-[11px] font-extrabold text-amber-300 cursor-pointer"
+            >
+              Menu com Escudos
+            </button>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 max-h-52 overflow-y-auto pr-1">
             {compTeams.map((t) => (
@@ -640,7 +654,7 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
                   userTeamId === t.id ? 'bg-slate-800 border-amber-400 text-white' : 'bg-slate-900 border-white/10 text-slate-300 hover:border-white/25'
                 }`}
               >
-                <ClubCrest team={t} className="w-5 h-5" />
+                <ClubCrest team={t} className="w-6 h-6 shrink-0" />
                 <span className="truncate">{t.name}</span>
                 <span className="ml-auto font-mono text-amber-400">{t.ovr}</span>
               </button>
@@ -657,6 +671,15 @@ export const TournamentView: React.FC<Props> = ({ defaultDifficulty = 'amador', 
             Iniciar {compMeta.name}
           </button>
         </div>
+
+        <TeamPickerModal
+          open={crestPickerOpen}
+          title={`Escolher Equipe · ${compMeta.name}`}
+          selectedTeamId={userTeam.id}
+          teams={compTeams}
+          onSelect={(team) => setUserTeamId(team.id)}
+          onClose={() => setCrestPickerOpen(false)}
+        />
       </div>
     );
   }

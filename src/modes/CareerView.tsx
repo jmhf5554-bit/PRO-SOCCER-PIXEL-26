@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChampionshipTrophy, ClubCrest, PlayerSpritePreview } from '../components/ClubPreview';
+import { TeamPickerModal } from '../components/TeamPickerModal';
 import { DIFFICULTIES, LEAGUES, TEAMS, getTeamBench, isKitClash } from '../data/leagues';
 import {
   DifficultyId,
@@ -166,6 +167,21 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
   const [hubTab, setHubTab] = useState<'hub' | 'squad' | 'market' | 'table'>('hub');
   const [statusNote, setStatusNote] = useState<string>('');
   const [swapStarterIdx, setSwapStarterIdx] = useState<number | null>(null);
+  const [crestPickerOpen, setCrestPickerOpen] = useState(false);
+  const [lastMatchBanner, setLastMatchBanner] = useState<{
+    homeName: string;
+    awayName: string;
+    homeAbbr: string;
+    awayAbbr: string;
+    homeScore: number;
+    awayScore: number;
+    homeShots: number;
+    awayShots: number;
+    homePossPct: number;
+    won: boolean;
+    draw: boolean;
+    subtitle: string;
+  } | null>(null);
 
   // Market & Negotiation state
   const [marketQuery, setMarketQuery] = useState('');
@@ -210,7 +226,13 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
       schedule: buildLeagueSchedule(setupLeagueClubs),
       scorers: {}
     };
+    try {
+      localStorage.setItem(STORAGE_MANAGER_KEY, JSON.stringify(save));
+    } catch {
+      /* ignore quota */
+    }
     setManagerSave(save);
+    setLastMatchBanner(null);
     setCareerKind('manager');
     setHubTab('hub');
     setStatusNote('');
@@ -248,7 +270,13 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
       points: initTable(setupLeagueClubs),
       schedule: buildLeagueSchedule(setupLeagueClubs)
     };
+    try {
+      localStorage.setItem(STORAGE_PLAYER_KEY, JSON.stringify(save));
+    } catch {
+      /* ignore quota */
+    }
     setPlayerSave(save);
+    setLastMatchBanner(null);
     setCareerKind('player');
     setHubTab('hub');
     setStatusNote('');
@@ -414,7 +442,27 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Shared Club & Difficulty Setup */}
           <div className="bg-slate-900/70 border border-white/10 rounded-xl p-4 space-y-4">
-            <div className="text-xs font-extrabold uppercase tracking-wider text-slate-300">1. Liga, Clube Inicial &amp; Dificuldade</div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs font-extrabold uppercase tracking-wider text-slate-300">1. Liga, Clube Inicial &amp; Dificuldade</div>
+              <button
+                type="button"
+                onClick={() => setCrestPickerOpen(true)}
+                className="min-h-[34px] px-3 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-[11px] font-extrabold text-amber-300 cursor-pointer"
+              >
+                Menu com Escudos
+              </button>
+            </div>
+
+            <div className="bg-slate-950/80 border border-white/10 rounded-xl p-3 flex items-center gap-3">
+              <ClubCrest team={previewClub} className="w-12 h-12 shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-black text-white truncate">{previewClub.name}</div>
+                <div className="text-[11px] text-slate-400 font-mono">
+                  {previewClub.abbr} · OVR {previewClub.ovr} · {clubLeagues.find((l) => l.id === setupLeagueId)?.name}
+                </div>
+              </div>
+            </div>
+
             <select
               value={setupLeagueId}
               onChange={(e) => {
@@ -437,11 +485,11 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
                   key={c.id}
                   type="button"
                   onClick={() => setSetupClubId(c.id)}
-                  className={`min-h-[42px] px-2.5 rounded-xl border flex items-center gap-2 text-xs font-bold cursor-pointer transition ${
+                  className={`min-h-[44px] px-2.5 rounded-xl border flex items-center gap-2 text-xs font-bold cursor-pointer transition ${
                     setupClubId === c.id ? 'bg-slate-800 border-amber-400 text-white' : 'bg-slate-950 border-white/10 text-slate-300 hover:border-white/25'
                   }`}
                 >
-                  <ClubCrest team={c} className="w-5 h-5" />
+                  <ClubCrest team={c} className="w-6 h-6 shrink-0" />
                   <span className="truncate">{c.name}</span>
                   <span className="ml-auto font-mono text-[10px] text-amber-400">{c.ovr}</span>
                 </button>
@@ -548,6 +596,19 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
             </button>
           </div>
         </div>
+
+        <TeamPickerModal
+          open={crestPickerOpen}
+          title="Escolher Clube com Escudos"
+          selectedTeamId={setupClubId}
+          leagues={clubLeagues}
+          initialLeagueId={setupLeagueId}
+          onSelect={(team, lid) => {
+            setSetupLeagueId(lid);
+            setSetupClubId(team.id);
+          }}
+          onClose={() => setCrestPickerOpen(false)}
+        />
       </div>
     );
   }
@@ -617,6 +678,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
     const playManagerMatch = () => {
       if (!nextFx || !nextOpp) return;
       const isHome = nextFx.homeId === club.id;
+      const playedRound = managerSave.round;
       onStartMatch(
         {
           mode: 'career_manager',
@@ -632,51 +694,76 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
           const won = res.homeScore > res.awayScore;
           const draw = res.homeScore === res.awayScore;
           const prize = won ? 280 : draw ? 135 : 70;
-          const totalWages = Math.round(
-            [...managerSave.squad, ...managerSave.bench].reduce((s, p) => s + p.salary, 0) * 0.08
-          );
-          const nextScorers = { ...(managerSave.scorers || {}) };
-          const { nextPts, nextSchedule } = advanceRoundTable(
-            mgrLeagueClubs,
-            managerSave.points,
-            managerSave.schedule,
-            managerSave.round,
-            club.id,
-            res.homeScore,
-            res.awayScore,
-            isHome,
-            nextScorers,
-            managerSave.squad
-          );
-
-          // Update squad fatigue & injury risk + heal bench
           let newInjuryMsg = '';
-          const nextSquad = managerSave.squad.map((p) => {
-            const newFatigue = Math.min(100, p.fatigue + 16 + Math.floor(Math.random() * 8));
-            let inj = Math.max(0, p.injuredRounds - 1);
-            if (inj === 0 && newFatigue > 78 && Math.random() < 0.28) {
-              inj = 1;
-              newInjuryMsg = `${p.name} sentiu fadiga muscular (1 rodada).`;
-            }
-            return { ...p, fatigue: newFatigue, injuredRounds: inj };
-          });
-          const nextBench = managerSave.bench.map((b) => ({
-            ...b,
-            fatigue: Math.max(0, b.fatigue - 18),
-            injuredRounds: Math.max(0, b.injuredRounds - 1)
-          }));
 
-          setManagerSave({
-            ...managerSave,
-            round: managerSave.round + 1,
-            budget: Math.max(50, managerSave.budget + prize - totalWages),
-            morale: Math.max(40, Math.min(100, managerSave.morale + (won ? 7 : draw ? 1 : -5))),
-            squad: nextSquad,
-            bench: nextBench,
-            points: nextPts,
-            schedule: nextSchedule,
-            scorers: nextScorers
+          setManagerSave((prev) => {
+            if (!prev) return prev;
+            const totalWages = Math.round(
+              [...prev.squad, ...prev.bench].reduce((s, p) => s + p.salary, 0) * 0.08
+            );
+            const nextScorers = { ...(prev.scorers || {}) };
+            const { nextPts, nextSchedule } = advanceRoundTable(
+              mgrLeagueClubs,
+              prev.points,
+              prev.schedule,
+              playedRound,
+              club.id,
+              res.homeScore,
+              res.awayScore,
+              isHome,
+              nextScorers,
+              prev.squad
+            );
+
+            const nextSquad = prev.squad.map((p) => {
+              const newFatigue = Math.min(100, p.fatigue + 16 + Math.floor(Math.random() * 8));
+              let inj = Math.max(0, p.injuredRounds - 1);
+              if (inj === 0 && newFatigue > 78 && Math.random() < 0.28) {
+                inj = 1;
+                newInjuryMsg = `${p.name} sentiu fadiga muscular (1 rodada).`;
+              }
+              return { ...p, fatigue: newFatigue, injuredRounds: inj };
+            });
+            const nextBench = prev.bench.map((b) => ({
+              ...b,
+              fatigue: Math.max(0, b.fatigue - 18),
+              injuredRounds: Math.max(0, b.injuredRounds - 1)
+            }));
+
+            const updated: ManagerSave = {
+              ...prev,
+              round: Math.max(prev.round, playedRound + 1),
+              budget: Math.max(50, prev.budget + prize - totalWages),
+              morale: Math.max(40, Math.min(100, prev.morale + (won ? 7 : draw ? 1 : -5))),
+              squad: nextSquad,
+              bench: nextBench,
+              points: nextPts,
+              schedule: nextSchedule,
+              scorers: nextScorers
+            };
+            try {
+              localStorage.setItem(STORAGE_MANAGER_KEY, JSON.stringify(updated));
+            } catch {
+              /* ignore quota */
+            }
+            return updated;
           });
+
+          setLastMatchBanner({
+            homeName: club.name,
+            awayName: nextOpp.name,
+            homeAbbr: club.abbr,
+            awayAbbr: nextOpp.abbr,
+            homeScore: res.homeScore,
+            awayScore: res.awayScore,
+            homeShots: res.homeShots,
+            awayShots: res.awayShots,
+            homePossPct: res.homePossPct,
+            won,
+            draw,
+            subtitle: `${won ? '+3 pontos na tabela!' : draw ? '+1 ponto na tabela.' : 'Sem pontos nesta rodada.'} · Premiação +R$ ${prize}M`
+          });
+          setHubTab('hub');
           if (newInjuryMsg) setStatusNote(newInjuryMsg);
         }
       );
@@ -878,6 +965,47 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
             <button type="button" onClick={() => setStatusNote('')} className="text-[11px] font-bold text-emerald-300 cursor-pointer">
               Fechar
             </button>
+          </div>
+        )}
+
+        {lastMatchBanner && (
+          <div
+            className={`rounded-xl border p-3.5 flex flex-wrap items-center justify-between gap-3 ${
+              lastMatchBanner.won
+                ? 'bg-gradient-to-r from-emerald-950/90 to-slate-900 border-emerald-400/60'
+                : lastMatchBanner.draw
+                ? 'bg-gradient-to-r from-amber-950/60 to-slate-900 border-amber-400/50'
+                : 'bg-gradient-to-r from-rose-950/60 to-slate-900 border-rose-400/50'
+            }`}
+          >
+            <div className="space-y-0.5">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-amber-300">
+                {lastMatchBanner.won ? 'Vitória Salva na Carreira!' : lastMatchBanner.draw ? 'Empate Salvo na Carreira' : 'Fim da Partida'}
+              </div>
+              <div className="text-sm sm:text-base font-black text-white tabular-nums">
+                {lastMatchBanner.homeAbbr} {lastMatchBanner.homeScore} x {lastMatchBanner.awayScore} {lastMatchBanner.awayAbbr}{' '}
+                <span className="text-xs font-semibold text-slate-300 ml-2">
+                  Chutes {lastMatchBanner.homeShots}-{lastMatchBanner.awayShots} · Posse {lastMatchBanner.homePossPct}%
+                </span>
+              </div>
+              <div className="text-xs text-emerald-300 font-semibold">{lastMatchBanner.subtitle}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHubTab('table')}
+                className="min-h-[34px] px-3 rounded-lg bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer"
+              >
+                Ver Classificação
+              </button>
+              <button
+                type="button"
+                onClick={() => setLastMatchBanner(null)}
+                className="min-h-[34px] px-3 rounded-lg bg-slate-800 text-xs font-bold text-slate-300 cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         )}
 
@@ -1335,6 +1463,7 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
     const playPlayerMatch = () => {
       if (!nextFx || !nextOpp) return;
       const isHome = nextFx.homeId === activeScheduleClub;
+      const playedRound = playerSave.round;
       onStartMatch(
         {
           mode: 'career_player',
@@ -1347,26 +1476,51 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
           customPlayer: playerSave.custom
         },
         (res) => {
+          const won = res.homeScore > res.awayScore;
+          const draw = res.homeScore === res.awayScore;
           const earnedXp = Math.round(res.playerRating * 16 + res.userGoals * 40 + res.userAssists * 24);
-          const { nextPts, nextSchedule } = advanceRoundTable(
-            pLeagueClubs,
-            playerSave.points,
-            playerSave.schedule,
-            playerSave.round,
-            activeScheduleClub,
-            res.homeScore,
-            res.awayScore,
-            isHome
-          );
-          setPlayerSave({
-            ...playerSave,
-            round: playerSave.round + 1,
-            xp: playerSave.xp + earnedXp,
-            goals: playerSave.goals + res.userGoals,
-            assists: playerSave.assists + res.userAssists,
-            ratings: [...playerSave.ratings, res.playerRating],
-            points: nextPts,
-            schedule: nextSchedule
+          setPlayerSave((prev) => {
+            if (!prev) return prev;
+            const { nextPts, nextSchedule } = advanceRoundTable(
+              pLeagueClubs,
+              prev.points,
+              prev.schedule,
+              playedRound,
+              activeScheduleClub,
+              res.homeScore,
+              res.awayScore,
+              isHome
+            );
+            const updated: PlayerSave = {
+              ...prev,
+              round: Math.max(prev.round, playedRound + 1),
+              xp: prev.xp + earnedXp,
+              goals: prev.goals + res.userGoals,
+              assists: prev.assists + res.userAssists,
+              ratings: [...prev.ratings, res.playerRating],
+              points: nextPts,
+              schedule: nextSchedule
+            };
+            try {
+              localStorage.setItem(STORAGE_PLAYER_KEY, JSON.stringify(updated));
+            } catch {
+              /* ignore quota */
+            }
+            return updated;
+          });
+          setLastMatchBanner({
+            homeName: club.name,
+            awayName: nextOpp.name,
+            homeAbbr: club.abbr,
+            awayAbbr: nextOpp.abbr,
+            homeScore: res.homeScore,
+            awayScore: res.awayScore,
+            homeShots: res.homeShots,
+            awayShots: res.awayShots,
+            homePossPct: res.homePossPct,
+            won,
+            draw,
+            subtitle: `Nota ${res.playerRating} · +${earnedXp} XP · Gols: ${res.userGoals} · Assistências: ${res.userAssists}`
           });
         }
       );
@@ -1406,6 +1560,35 @@ export const CareerView: React.FC<Props> = ({ defaultDifficulty = 'amador', onSt
             Sair
           </button>
         </div>
+
+        {lastMatchBanner && (
+          <div
+            className={`rounded-xl border p-3.5 flex flex-wrap items-center justify-between gap-3 ${
+              lastMatchBanner.won
+                ? 'bg-gradient-to-r from-emerald-950/90 to-slate-900 border-emerald-400/60'
+                : lastMatchBanner.draw
+                ? 'bg-gradient-to-r from-amber-950/60 to-slate-900 border-amber-400/50'
+                : 'bg-gradient-to-r from-rose-950/60 to-slate-900 border-rose-400/50'
+            }`}
+          >
+            <div className="space-y-0.5">
+              <div className="text-[11px] font-extrabold uppercase tracking-wider text-amber-300">
+                {lastMatchBanner.won ? 'Vitória Salva na Carreira!' : lastMatchBanner.draw ? 'Empate Salvo na Carreira' : 'Partida Finalizada'}
+              </div>
+              <div className="text-sm sm:text-base font-black text-white tabular-nums">
+                {lastMatchBanner.homeAbbr} {lastMatchBanner.homeScore} x {lastMatchBanner.awayScore} {lastMatchBanner.awayAbbr}
+              </div>
+              <div className="text-xs text-sky-300 font-semibold">{lastMatchBanner.subtitle}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLastMatchBanner(null)}
+              className="min-h-[34px] px-3 rounded-lg bg-slate-800 text-xs font-bold text-slate-300 cursor-pointer"
+            >
+              Fechar
+            </button>
+          </div>
+        )}
 
         {seasonFinished ? (
           <div className="bg-slate-900 border border-amber-400/50 rounded-xl p-6 text-center space-y-3">

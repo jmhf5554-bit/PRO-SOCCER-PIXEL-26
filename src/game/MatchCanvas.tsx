@@ -479,6 +479,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       activeAway: null as PlayerEntity | null,
       p1Charging: false,
       p1Power: 0,
+      p1Buffer: null as { kind: 'short' | 'through' | 'cross' | 'shot'; aimX: number; aimY: number; ttl: number } | null,
       p2Charging: false,
       p2Power: 0,
       training: {
@@ -850,7 +851,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         const dist = Math.hypot(dx, dy);
         if (dist < 15) continue;
         const dot = (dx / dist) * nx + (dy / dist) * ny;
-        const score = dot * 2.1 - Math.abs(dist - 150) * 0.002 - (tm.data.role === 'GOL' ? 0.35 : 0);
+        const score = dot * 2.5 - Math.abs(dist - 155) * 0.0018 - (tm.data.role === 'GOL' ? 0.45 : 0);
         if (score > bestScore) {
           bestScore = score;
           best = tm;
@@ -947,10 +948,10 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       const dist = Math.hypot(dx, dy) || 1;
       const spd =
         kind === 'cross'
-          ? Math.min(395, Math.max(255, dist * 1.48))
+          ? Math.min(410, Math.max(265, dist * 1.56))
           : kind === 'through'
-          ? Math.min(410, Math.max(270, dist * 1.72))
-          : Math.min(365, Math.max(220, dist * 1.6));
+          ? Math.min(435, Math.max(285, dist * 1.85))
+          : Math.min(395, Math.max(245, dist * 1.82));
 
       g.ball.vx = (dx / dist) * spd;
       g.ball.vy = (dy / dist) * spd;
@@ -968,6 +969,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
     ) => {
       const attackDir = shooter.side === 'home' ? 1 : -1;
       const goalX = PITCH.halfW * attackDir;
+      const oppGk = g.players.find((o) => !o.ejected && o.side !== shooter.side && o.slot === 'GOL');
 
       let targetY: number;
       if (shooter.side === 'away' && !hasHumanAway) {
@@ -977,16 +979,18 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         const variance = (1 - diff.shotAccuracy) * 44 * (Math.random() - 0.5);
         targetY = Math.max(-PITCH.goalHalfW + 5, Math.min(PITCH.goalHalfW - 5, cornerY + variance));
       } else {
-        const baseY = aimY !== 0 ? aimY * (PITCH.goalHalfW - 8) : shooter.y * 0.32;
-        targetY = Math.max(-PITCH.goalHalfW + 5, Math.min(PITCH.goalHalfW - 5, baseY + (Math.random() - 0.5) * 10));
+        const openCorner = oppGk ? (oppGk.y >= 0 ? -(PITCH.goalHalfW - 10) : PITCH.goalHalfW - 10) : shooter.y * 0.35;
+        const baseY = aimY !== 0 ? aimY * (PITCH.goalHalfW - 7) : openCorner * 0.72 + shooter.y * 0.16;
+        targetY = Math.max(-PITCH.goalHalfW + 5, Math.min(PITCH.goalHalfW - 5, baseY + (Math.random() - 0.5) * 7));
       }
 
       const dx = goalX - g.ball.x;
       const dy = targetY - g.ball.y;
       const dist = Math.hypot(dx, dy) || 1;
-      const p = Math.max(0.18, Math.min(1, power));
-      const shotBoost = shooter.data.shooting ? (shooter.data.shooting - 75) * 1.8 : 0;
-      const spd = 345 + p * 275 + shotBoost + (isVolley ? 45 : 0);
+      const p = Math.max(0.22, Math.min(1, power));
+      const shotBoost = shooter.data.shooting ? (shooter.data.shooting - 75) * 1.85 : 0;
+      const spd = 365 + p * 285 + shotBoost + (isVolley ? 48 : 0);
+      const finCurve = curveAmount !== 0 ? curveAmount : aimY !== 0 ? -aimY * 32 : 0;
 
       g.ball.prevTouchPlayer = g.ball.lastTouchPlayer;
       g.ball.lastTouchPlayer = shooter;
@@ -996,7 +1000,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       g.ball.vx = (dx / dist) * spd;
       g.ball.vy = (dy / dist) * spd;
       g.ball.vz = isVolley ? 65 : 44 + p * 105;
-      g.ball.curve = curveAmount;
+      g.ball.curve = finCurve;
 
       shooter.action = isVolley ? 'volley' : 'kick';
       shooter.actionTimer = isVolley ? 0.38 : 0.24;
@@ -1529,15 +1533,26 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
 
       let tx = pl.homeX + b.x * 0.46;
       let ty = pl.homeY + b.y * 0.34;
-      if (teamHas) tx += 110 * dir;
-      else if (oppHas) tx -= 65 * dir;
+      if (teamHas && b.owner) {
+        tx += 118 * dir;
+        if (pl.data.role === 'ATA' || pl.data.role === 'MEI') {
+          const attackPush = pl.data.role === 'ATA' ? 148 : 96;
+          tx = Math.max(tx, b.x + attackPush * dir);
+          // Spread open into passing lanes away from ball carrier
+          const laneSpread = pl.homeY >= 0 ? 52 : -52;
+          const carrierOverlap = Math.abs(pl.y - b.owner.y) < 42 ? (pl.y >= b.owner.y ? 35 : -35) : 0;
+          ty = pl.homeY * 0.72 + b.y * 0.18 + laneSpread * 0.25 + carrierOverlap;
+        }
+      } else if (oppHas) {
+        tx -= 65 * dir;
+      }
       tx = Math.max(-PITCH.halfW + 45, Math.min(PITCH.halfW - 45, tx));
       ty = Math.max(-PITCH.halfH + 28, Math.min(PITCH.halfH - 28, ty));
 
       const dx = tx - pl.x;
       const dy = ty - pl.y;
-      if (Math.hypot(dx, dy) < 12) return { mx: 0, my: 0 };
-      return { mx: dx, my: dy, spd: pl.speed * (pl.side === 'away' ? diff.aiSpeedMult * 0.92 : 0.88) };
+      if (Math.hypot(dx, dy) < 10) return { mx: 0, my: 0 };
+      return { mx: dx, my: dy, spd: pl.speed * (pl.side === 'away' ? diff.aiSpeedMult * 0.92 : 0.94) };
     };
 
     const recordSnapshot = () => {
@@ -1896,21 +1911,27 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       if (homeHasBall && lockedIdx === undefined) g.activeHome = g.ball.owner;
       const p1 = g.activeHome;
 
+      if (g.p1Buffer) {
+        g.p1Buffer.ttl -= dt;
+        if (g.p1Buffer.ttl <= 0) g.p1Buffer = null;
+      }
+
       if (p1ShiftJust && !homeHasBall) {
         switchClosest('home');
       }
 
       if (p1 && g.ball.owner === p1) {
+        g.p1Buffer = null;
         if (p1ShieldJust && p1.feintCooldown <= 0) {
           const fdirY = p1Move.iy !== 0 ? p1Move.iy : p1.y > 0 ? -1 : 1;
-          p1.y = Math.max(-PITCH.halfH + 12, Math.min(PITCH.halfH - 12, p1.y + fdirY * 14));
-          p1.x = Math.max(-PITCH.halfW + 12, Math.min(PITCH.halfW - 12, p1.x + p1.dirX * 10));
-          p1.feintCooldown = 0.7;
-          p1.stamina = Math.max(15, p1.stamina - 6);
+          p1.y = Math.max(-PITCH.halfH + 12, Math.min(PITCH.halfH - 12, p1.y + fdirY * 15));
+          p1.x = Math.max(-PITCH.halfW + 12, Math.min(PITCH.halfW - 12, p1.x + p1.dirX * 14));
+          p1.feintCooldown = 0.52;
+          p1.stamina = Math.max(15, p1.stamina - 5);
           spawnDust(p1.x, p1.y, 4, '#f8fafc');
         }
         if (p1ShieldHeld) {
-          p1.shieldTimer = 0.14;
+          p1.shieldTimer = 0.16;
         }
 
         if (p1ShortPass || p1ThroughPass || p1CrossPass) {
@@ -1921,9 +1942,9 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         } else {
           if (p1ShootJust || (p1ShootHeld && !g.p1Charging)) {
             g.p1Charging = true;
-            g.p1Power = 0.16;
+            g.p1Power = 0.22;
           }
-          if (g.p1Charging && p1ShootHeld) g.p1Power = Math.min(1, g.p1Power + dt * 1.75);
+          if (g.p1Charging && p1ShootHeld) g.p1Power = Math.min(1, g.p1Power + dt * 2.15);
           if (g.p1Charging && (!p1ShootHeld || p1ShootReleased || tIn.shootReleased)) {
             performShot(p1, g.p1Power, p1Move.iy);
             if (isTraining) {
@@ -1938,15 +1959,30 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
       } else {
         g.p1Charging = false;
         g.p1Power = 0;
-        if (p1ShortPass && !p1ShiftJust) switchClosest('home');
+        const p1DistToBall = p1 ? Math.hypot(p1.x - g.ball.x, p1.y - g.ball.y) : 999;
+        const ballFreeAndClose = !g.ball.owner && p1DistToBall < 115;
+
+        if ((p1ShortPass || p1ThroughPass || p1CrossPass) && ballFreeAndClose) {
+          g.p1Buffer = {
+            kind: p1CrossPass ? 'cross' : p1ThroughPass ? 'through' : 'short',
+            aimX: p1Move.ix,
+            aimY: p1Move.iy,
+            ttl: 0.3
+          };
+        } else if (p1ShortPass && !p1ShiftJust) {
+          switchClosest('home');
+        }
+
         if (p1ShootJust && p1 && p1.slot !== 'GOL' && !p1.ejected) {
-          if (!g.ball.owner && g.ball.z > 8 && Math.hypot(p1.x - g.ball.x, p1.y - g.ball.y) < 34) {
-            performShot(p1, 0.9, p1Move.iy, true);
+          if (!g.ball.owner && g.ball.z > 8 && p1DistToBall < 38) {
+            performShot(p1, 0.92, p1Move.iy, true);
             if (isTraining) {
               g.training.shotLive = true;
               g.training.shotIdleTimer = 0;
               g.training.volleyScored = true;
             }
+          } else if (ballFreeAndClose && p1DistToBall < 92) {
+            g.p1Buffer = { kind: 'shot', aimX: p1Move.ix, aimY: p1Move.iy, ttl: 0.28 };
           } else {
             performTackle(p1);
           }
@@ -2109,12 +2145,19 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           const m = getP1Move();
           mx = m.ix;
           my = m.iy;
-          if (g.ball.owner === pl) spd *= 0.96;
+          if (mx === 0 && my === 0 && !g.ball.owner && g.ball.lastTouchTeam === 'home') {
+            const dBall = Math.hypot(g.ball.x - pl.x, g.ball.y - pl.y);
+            if (dBall > 6 && dBall < 85) {
+              mx = (g.ball.x - pl.x) / dBall;
+              my = (g.ball.y - pl.y) / dBall;
+            }
+          }
+          if (g.ball.owner === pl) spd *= 0.985;
           if (p1SprintHeld && pl.stamina > 12 && (mx !== 0 || my !== 0)) {
-            spd *= 1.28;
+            spd *= 1.3;
             sprinting = true;
           }
-          if (pl.shieldTimer > 0) spd *= 0.7;
+          if (pl.shieldTimer > 0) spd *= 0.72;
         } else if (hasHumanAway && pl === g.activeAway && pl.slot !== 'GOL') {
           const m = isOnlineHost ? { ix: remoteGuestInput.ix, iy: remoteGuestInput.iy } : getP2Move();
           mx = m.ix;
@@ -2226,13 +2269,20 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
           if (other.ejected) continue;
           if (other.side !== ow.side && other.stunTimer <= 0 && b.pickupCooldown <= 0) {
             const d = Math.hypot(other.x - b.x, other.y - b.y);
-            const shieldPenalty = ow.shieldTimer > 0 ? -4 : 0;
+            const shieldPenalty = ow.shieldTimer > 0 ? -4.5 : 0;
+            const dribbleBonus = Math.hypot(ow.vx, ow.vy) > 65 ? -1.5 : 0;
             const stealR =
-              (other.slot === 'GOL' ? 16 : other.side === 'away' ? 10 + diff.punishFactor * 3 : 11) + shieldPenalty;
+              (other.slot === 'GOL' ? 16 : other.side === 'away' ? 9 + diff.punishFactor * 2.5 : 11) +
+              shieldPenalty +
+              dribbleBonus;
+            if (ow.shieldTimer > 0 && d < 14 && d >= stealR) {
+              other.x += (other.x - ow.x) * 0.14;
+              other.y += (other.y - ow.y) * 0.14;
+            }
             if (d < stealR) {
               ow.stunTimer = 0.28;
               b.owner = other;
-              b.pickupCooldown = 0.22;
+              b.pickupCooldown = 0.24;
               b.lastTouchTeam = other.side;
               b.lastTouchPlayer = other;
               if (other.slot === 'GOL') other.aiPassCooldown = 0.55;
@@ -2356,6 +2406,16 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
                 if (pl.slot === 'GOL') pl.aiPassCooldown = 0.45;
                 if (pl.side === 'home' && pl.slot !== 'GOL' && lockedIdx === undefined) g.activeHome = pl;
                 if (pl.side === 'away' && pl.slot !== 'GOL' && hasHumanAway) g.activeAway = pl;
+
+                if (pl === g.activeHome && g.p1Buffer) {
+                  const buf = g.p1Buffer;
+                  g.p1Buffer = null;
+                  if (buf.kind === 'shot') {
+                    performShot(pl, 0.78, buf.aimY, b.z > 6);
+                  } else {
+                    performPass(pl, buf.aimX, buf.aimY, buf.kind);
+                  }
+                }
               }
               break;
             }
@@ -2364,14 +2424,14 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
         checkGoalsAndBounds();
       }
 
-      const lookAhead = b.owner ? (b.owner.side === 'home' ? 42 : -42) : b.vx * 0.14;
+      const lookAhead = b.owner ? (b.owner.side === 'home' ? 50 : -50) : b.vx * 0.16;
       const lockedUser = lockedIdx !== undefined ? g.activeHome : null;
       const focusX = lockedUser ? lockedUser.x * 0.55 + b.x * 0.45 : b.x + lookAhead;
       const focusY = lockedUser ? lockedUser.y * 0.55 + b.y * 0.45 : b.y * 0.58;
       const targetCamX = Math.max(-225, Math.min(225, focusX));
       const targetCamY = Math.max(-95, Math.min(95, focusY));
-      g.camX += (targetCamX - g.camX) * Math.min(1, dt * 6.5);
-      g.camY += (targetCamY - g.camY) * Math.min(1, dt * 6.5);
+      g.camX += (targetCamX - g.camX) * Math.min(1, dt * 7.2);
+      g.camY += (targetCamY - g.camY) * Math.min(1, dt * 7.2);
 
       recordSnapshot();
     };
@@ -3040,7 +3100,7 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
             // Crisp Pixel Triangle Indicator above controlled player
             if (isP1 || isP2) {
               const bob = Math.round(Math.sin(performance.now() * 0.009) * 1.5);
-              const ay = Math.round(py - 33 * sc + bob);
+              const ay = Math.round(py - 31 * sc + bob);
               const col = isP1 ? '#22d3ee' : '#fb7185';
               ctx.fillStyle = '#111111';
               ctx.fillRect(px - 4, ay - 5, 8, 2);
@@ -3053,17 +3113,42 @@ export const MatchCanvas: React.FC<Props> = ({ config, onFinish, onExit }) => {
               ctx.fillRect(px - 1, ay - 1, 2, 1);
             }
 
-            // Crisp Pixel Nameplate
-            if (isCarrier || isP1) {
-              const lbl = `${pl.data.num}. ${pl.data.name}`;
-              ctx.font = '700 6px Silkscreen, monospace';
+            // Clear, High-Contrast Broadcast Nameplate above player head
+            const distToBall = Math.hypot(wx - activeBall.x, wy - activeBall.y);
+            if (isCarrier || isP1 || isP2 || distToBall < 130) {
+              const isFocus = isCarrier || isP1 || isP2;
+              const lbl = isFocus ? `${pl.data.num} ${pl.data.name}` : pl.data.name;
+              ctx.save();
+              ctx.font = isFocus
+                ? '700 8px "Plus Jakarta Sans", system-ui, sans-serif'
+                : '700 7px "Plus Jakarta Sans", system-ui, sans-serif';
               ctx.textAlign = 'center';
-              ctx.lineWidth = 2;
-              ctx.strokeStyle = '#090d16';
-              ctx.strokeText(lbl, px, Math.round(py - 40 * sc));
-              ctx.fillStyle = '#ffffff';
-              ctx.fillText(lbl, px, Math.round(py - 40 * sc));
-              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              const tw = Math.ceil(ctx.measureText(lbl).width);
+              const pw = tw + (isFocus ? 10 : 8);
+              const ph = isFocus ? 12 : 10;
+              const ny = Math.round(py - (isP1 || isP2 ? 43 : 36) * sc);
+              const rx = Math.round(px - pw / 2);
+              const ry = Math.round(ny - ph / 2);
+
+              ctx.fillStyle = isFocus ? 'rgba(6, 12, 24, 0.88)' : 'rgba(6, 12, 24, 0.68)';
+              ctx.fillRect(rx, ry, pw, ph);
+
+              const accent = isP1
+                ? '#22d3ee'
+                : isP2
+                ? '#fb7185'
+                : isCarrier
+                ? '#facc15'
+                : pl.side === 'home'
+                ? 'rgba(56, 189, 248, 0.65)'
+                : 'rgba(248, 113, 113, 0.65)';
+              ctx.fillStyle = accent;
+              ctx.fillRect(rx, ry + ph - 1.5, pw, 1.5);
+
+              ctx.fillStyle = isFocus ? '#ffffff' : 'rgba(241, 245, 249, 0.9)';
+              ctx.fillText(lbl, px, ny - 0.5);
+              ctx.restore();
             }
           }
         });

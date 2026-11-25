@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClubCrest } from '../components/ClubPreview';
+import { TeamPickerModal } from '../components/TeamPickerModal';
 import { LEAGUES, TEAMS, isKitClash } from '../data/leagues';
 import {
   DifficultyId,
@@ -93,6 +94,7 @@ export const OnlineView: React.FC<Props> = ({
   const [wsConnected, setWsConnected] = useState(false);
   const [openRooms, setOpenRooms] = useState<RoomStateView[]>([]);
   const [room, setRoom] = useState<RoomStateView | null>(null);
+  const [crestPickerOpen, setCrestPickerOpen] = useState(false);
   const [role, setRole] = useState<'host' | 'guest' | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [chatInput, setChatInput] = useState('');
@@ -661,19 +663,28 @@ export const OnlineView: React.FC<Props> = ({
 
                   {/* My Team Selector inside Room */}
                   <div className="bg-slate-900/75 border border-white/10 rounded-xl p-3.5 space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="text-xs font-extrabold uppercase text-emerald-300">Seu Clube na Sala</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const nextAway = !useAwayKit;
-                          setUseAwayKit(nextAway);
-                          sendWs({ type: 'update_setup', useAway: nextAway });
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 border border-white/15 text-[11px] font-bold text-white cursor-pointer"
-                      >
-                        Uniforme: {useAwayKit ? 'Reserva' : 'Titular'}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setCrestPickerOpen(true)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-[11px] font-extrabold text-amber-300 cursor-pointer"
+                        >
+                          Escudos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextAway = !useAwayKit;
+                            setUseAwayKit(nextAway);
+                            sendWs({ type: 'update_setup', useAway: nextAway });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 border border-white/15 text-[11px] font-bold text-white cursor-pointer"
+                        >
+                          Uniforme: {useAwayKit ? 'Reserva' : 'Titular'}
+                        </button>
+                      </div>
                     </div>
                     <select
                       value={selectedLeagueId}
@@ -785,7 +796,16 @@ export const OnlineView: React.FC<Props> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <div className="text-xs font-extrabold uppercase text-emerald-300">Seu Clube para Jogar</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-extrabold uppercase text-emerald-300">Seu Clube para Jogar</div>
+                    <button
+                      type="button"
+                      onClick={() => setCrestPickerOpen(true)}
+                      className="px-2.5 py-1 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-[11px] font-extrabold text-amber-300 cursor-pointer"
+                    >
+                      Menu com Escudos
+                    </button>
+                  </div>
                   <select
                     value={selectedLeagueId}
                     onChange={(e) => {
@@ -983,6 +1003,19 @@ export const OnlineView: React.FC<Props> = ({
           )}
         </div>
       )}
+
+      <TeamPickerModal
+        open={crestPickerOpen}
+        title="Escolher Clube com Escudos"
+        selectedTeamId={room ? myParticipant?.teamId || selectedTeamId : selectedTeamId}
+        initialLeagueId={selectedLeagueId}
+        onSelect={(team, lid) => {
+          setSelectedLeagueId(lid);
+          setSelectedTeamId(team.id);
+          if (room) sendWs({ type: 'update_setup', teamId: team.id });
+        }}
+        onClose={() => setCrestPickerOpen(false)}
+      />
     </div>
   );
 };
