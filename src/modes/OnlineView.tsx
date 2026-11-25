@@ -1,7 +1,9 @@
+import { onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClubCrest } from '../components/ClubPreview';
 import { TeamPickerModal } from '../components/TeamPickerModal';
 import { LEAGUES, TEAMS, isKitClash } from '../data/leagues';
+import { auth, googleAuthProvider } from '../lib/firebase';
 import {
   DifficultyId,
   MatchConfig,
@@ -14,6 +16,7 @@ import {
 
 export interface OnlinePlayerProfile {
   id: number;
+  uid?: string;
   nickname: string;
   favoriteTeamId: string;
   elo: number;
@@ -50,17 +53,17 @@ interface RoomStateView {
 
 interface HistoryMatch {
   id: number;
-  room_code: string;
-  home_nickname: string;
-  away_nickname: string;
-  home_team_id: string;
-  away_team_id: string;
-  home_score: number;
-  away_score: number;
-  home_shots: number;
-  away_shots: number;
-  home_poss: number;
-  created_at: string;
+  roomCode: string;
+  homeNickname: string;
+  awayNickname: string;
+  homeTeamId: string;
+  awayTeamId: string;
+  homeScore: number;
+  awayScore: number;
+  homeShots: number;
+  awayShots: number;
+  homePoss: number;
+  createdAt?: string | null;
 }
 
 interface ChatEntry {
@@ -83,10 +86,10 @@ export const OnlineView: React.FC<Props> = ({
   onBack
 }) => {
   const [nickname, setNickname] = useState('');
-  const [password, setPassword] = useState('');
   const [favLeagueId, setFavLeagueId] = useState('brasileirao');
   const [favTeamId, setFavTeamId] = useState('flamengo');
   const [authLoading, setAuthLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [noticeMsg, setNoticeMsg] = useState('');
 
@@ -114,6 +117,8 @@ export const OnlineView: React.FC<Props> = ({
   const onSessionChangeRef = useRef(onSessionChange);
   const roleRef = useRef(role);
   const sessionRef = useRef(session);
+  const nickRef = useRef(nickname);
+  const favTeamRef = useRef(favTeamId);
 
   useEffect(() => {
     onStartMatchRef.current = onStartOnlineMatch;
@@ -130,6 +135,14 @@ export const OnlineView: React.FC<Props> = ({
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(() => {
+    nickRef.current = nickname;
+  }, [nickname]);
+
+  useEffect(() => {
+    favTeamRef.current = favTeamId;
+  }, [favTeamId]);
 
   const leagueTeams = useMemo(
     () => TEAMS.filter((t) => t.leagueId === selectedLeagueId),
@@ -161,12 +174,47 @@ export const OnlineView: React.FC<Props> = ({
         setOpenRooms(d.rooms || []);
       }
     } catch {
-      // Offline or transient network issue
+      // Transient network error
     }
   }, []);
 
   useEffect(() => {
     fetchBoardData();
+  }, [fetchBoardData]);
+
+  // Restore active Firebase user into in-memory token session without localStorage
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        if (sessionRef.current) onSessionChangeRef.current(null);
+        return;
+      }
+      if (sessionRef.current) return;
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/online/session', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            nickname: nickRef.current.trim() || user.displayName || '',
+            favoriteTeamId: favTeamRef.current
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          onSessionChangeRef.current({ token, player: data.player });
+          setNickname(data.player.nickname);
+          setSelectedTeamId(data.player.favoriteTeamId || 'flamengo');
+          fetchBoardData();
+        }
+      } catch {
+        // User can retry via sign-in button
+      }
+    });
+    return () => unsub();
   }, [fetchBoardData]);
 
   const buildOnlineBridge = useCallback(
@@ -311,9 +359,8 @@ export const OnlineView: React.FC<Props> = ({
         remoteStateHandlersRef.current.forEach((fn) => fn(payload));
       } else if (type === 'match_recorded') {
         setRoom(msg.room as RoomStateView);
-        setNoticeMsg(`Partida registrada no banco SQLite! Placar ${msg.homeScore} x ${msg.awayScore}`);
+        setNoticeMsg(`Partida encerrada e salva no ranking! Placar ${msg.homeScore} x ${msg.awayScore}`);
         fetchBoardData();
-        // Refresh player profile ELO in memory
         fetch('/api/online/me', {
           headers: { Authorization: `Bearer ${session.token}` }
         })
@@ -339,33 +386,73 @@ export const OnlineView: React.FC<Props> = ({
     };
   }, [session?.token, fetchBoardData, launchRoomMatch]);
 
-  const handleAuthSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleSignIn = async () => {
     setErrorMsg('');
     setAuthLoading(true);
     try {
-      const res = await fetch('/api/online/auth', {
+      const cred = await signInWithPopup(auth, googleAuthProvider);
+      const token = await cred.user.getIdToken();
+      const res = await fetch('/api/online/session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({
-          nickname: nickname.trim(),
-          password,
+          nickname: nickname.trim() || cred.user.displayName || '',
           favoriteTeamId: favTeamId
         })
       });
       const data = await res.json();
       if (!res.ok) {
-        setErrorMsg(data.error || 'Não foi possível entrar.');
+        setErrorMsg(data.error || 'Não foi possível entrar no modo online.');
       } else {
-        onSessionChange({ token: data.token, player: data.player });
+        onSessionChange({ token, player: data.player });
+        setNickname(data.player.nickname);
         setSelectedTeamId(data.player.favoriteTeamId || 'flamengo');
-        setNoticeMsg(data.isNew ? 'Conta criada no banco de dados!' : `Bem-vindo de volta, ${data.player.nickname}!`);
+        setNoticeMsg(`Conectado como ${data.player.nickname}!`);
+        fetchBoardData();
+      }
+    } catch (err: any) {
+      if (err?.code === 'auth/popup-closed-by-user') {
+        setErrorMsg('Login cancelado.');
+      } else {
+        setErrorMsg('Não foi possível conectar com sua conta Google agora.');
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleUpdateNickname = async () => {
+    if (!session || nickname.trim().length < 2) return;
+    setProfileSaving(true);
+    setErrorMsg('');
+    try {
+      const freshToken = (await auth.currentUser?.getIdToken()) || session.token;
+      const res = await fetch('/api/online/profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${freshToken}`
+        },
+        body: JSON.stringify({
+          nickname: nickname.trim(),
+          favoriteTeamId: selectedTeamId
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Não foi possível salvar o apelido.');
+      } else {
+        onSessionChange({ token: freshToken, player: data.player });
+        setNoticeMsg(`Apelido atualizado para ${data.player.nickname}!`);
         fetchBoardData();
       }
     } catch {
-      setErrorMsg('Servidor offline ou inacessível no momento.');
+      setErrorMsg('Erro ao atualizar perfil.');
     } finally {
-      setAuthLoading(false);
+      setProfileSaving(false);
     }
   };
 
@@ -406,26 +493,36 @@ export const OnlineView: React.FC<Props> = ({
     setChatInput('');
   };
 
+  const handleLogout = async () => {
+    sendWs({ type: 'leave_room' });
+    setRoom(null);
+    setRole(null);
+    await signOut(auth).catch(() => {});
+    onSessionChange(null);
+  };
+
   const myParticipant = room ? (role === 'host' ? room.host : room.guest) : null;
 
   return (
-    <div className="w-full max-w-6xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-cyan-400/30 rounded-2xl p-5 sm:p-6 space-y-5 shadow-2xl max-h-[94vh] overflow-y-auto">
+    <div className="w-full max-w-6xl mx-auto bg-slate-950/92 backdrop-blur-xl border border-cyan-400/30 rounded-2xl p-5 sm:p-6 space-y-5 shadow-2xl max-h-[94dvh] overflow-y-auto">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3.5">
         <div>
           <div className="flex items-center gap-2.5">
             <h2 className="font-display text-2xl font-black bg-gradient-to-r from-cyan-300 via-emerald-300 to-amber-300 bg-clip-text text-transparent uppercase tracking-tight">
               BRFC Online · Multiplayer &amp; Ranking
             </h2>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${
-                wsConnected ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40' : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              {wsConnected ? 'Conectado' : session ? 'Reconectando...' : 'Banco SQLite Ativo'}
-            </span>
+            {session && (
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${
+                  wsConnected ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40' : 'bg-slate-800 text-slate-400'
+                }`}
+              >
+                {wsConnected ? 'Ao Vivo' : 'Conectando...'}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-300">
-            Salas 1v1 em tempo real via WebSocket · Ranking ELO e histórico gravados no banco de dados
+            Jogue 1v1 em tempo real de qualquer dispositivo com ranking ELO e histórico sincronizado
           </p>
         </div>
 
@@ -433,12 +530,7 @@ export const OnlineView: React.FC<Props> = ({
           {session && (
             <button
               type="button"
-              onClick={() => {
-                sendWs({ type: 'leave_room' });
-                setRoom(null);
-                setRole(null);
-                onSessionChange(null);
-              }}
+              onClick={handleLogout}
               className="min-h-[38px] px-3.5 rounded-xl bg-rose-950/70 hover:bg-rose-900 border border-rose-500/40 text-xs font-bold text-rose-200 cursor-pointer"
             >
               Sair da Conta
@@ -498,91 +590,93 @@ export const OnlineView: React.FC<Props> = ({
       {tab === 'lobby' && (
         <>
           {!session ? (
-            <form
-              onSubmit={handleAuthSubmit}
-              className="grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-900/75 border border-white/10 rounded-2xl p-5"
-            >
-              <div className="space-y-3">
-                <h3 className="font-display text-lg font-black text-amber-300 uppercase">
-                  Entrar ou Criar Perfil Online
-                </h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Digite um apelido e uma senha/PIN (mínimo 4 caracteres). Se o apelido for novo, criamos sua conta automaticamente no banco de dados com <strong>1000 pts ELO</strong>.
-                </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-900/75 border border-white/10 rounded-2xl p-5">
+              <div className="space-y-3.5 flex flex-col justify-between">
                 <div className="space-y-2.5">
+                  <h3 className="font-display text-lg font-black text-amber-300 uppercase">
+                    Entrar no Modo Online
+                  </h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Entre com sua conta Google para salvar seu ELO, histórico e jogar salas 1v1 contra amigos no celular ou PC.
+                  </p>
                   <input
                     type="text"
-                    required
-                    minLength={2}
                     maxLength={18}
                     value={nickname}
                     onChange={(e) => setNickname(e.target.value)}
-                    placeholder="Seu Apelido (ex: CraqueBR)"
+                    placeholder="Apelido opcional (ex: CraqueBR)"
                     className="w-full bg-slate-950 border border-white/15 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white"
                   />
-                  <input
-                    type="password"
-                    required
-                    minLength={4}
-                    maxLength={64}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Senha ou PIN (mín. 4 dígitos)"
-                    className="w-full bg-slate-950 border border-white/15 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3 flex flex-col justify-between">
-                <div className="space-y-2">
-                  <div className="text-xs font-extrabold uppercase text-cyan-300">Clube do Coração</div>
-                  <select
-                    value={favLeagueId}
-                    onChange={(e) => {
-                      const nl = e.target.value;
-                      setFavLeagueId(nl);
-                      const first = TEAMS.find((t) => t.leagueId === nl);
-                      if (first) setFavTeamId(first.id);
-                    }}
-                    className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2 text-xs font-bold text-white"
-                  >
-                    {LEAGUES.map((l) => (
-                      <option key={l.id} value={l.id}>{l.name}</option>
-                    ))}
-                  </select>
-                  <div className="grid grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
-                    {favLeagueTeams.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => setFavTeamId(t.id)}
-                        className={`px-2.5 py-1.5 rounded-lg border flex items-center gap-2 text-xs font-bold cursor-pointer ${
-                          favTeamId === t.id ? 'bg-slate-800 border-amber-400 text-white' : 'bg-slate-950 border-white/10 text-slate-300'
-                        }`}
-                      >
-                        <ClubCrest team={t} className="w-4 h-4" />
-                        <span className="truncate">{t.name}</span>
-                      </button>
-                    ))}
-                  </div>
                 </div>
 
                 <button
-                  type="submit"
+                  type="button"
                   disabled={authLoading}
-                  className="w-full min-h-[46px] rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 disabled:opacity-50 text-sm font-black uppercase tracking-wider text-slate-950 cursor-pointer shadow-lg"
+                  onClick={handleGoogleSignIn}
+                  className="w-full min-h-[48px] px-4 rounded-xl bg-white hover:bg-slate-100 disabled:opacity-50 text-sm font-black text-slate-950 cursor-pointer shadow-lg flex items-center justify-center gap-2.5 transition"
                 >
-                  {authLoading ? 'Conectando...' : 'Entrar no Servidor Online'}
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#4285F4"
+                      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                    />
+                  </svg>
+                  {authLoading ? 'Conectando...' : 'Entrar com Google'}
                 </button>
               </div>
-            </form>
+
+              <div className="space-y-2.5">
+                <div className="text-xs font-extrabold uppercase text-cyan-300">Clube do Coração</div>
+                <select
+                  value={favLeagueId}
+                  onChange={(e) => {
+                    const nl = e.target.value;
+                    setFavLeagueId(nl);
+                    const first = TEAMS.find((t) => t.leagueId === nl);
+                    if (first) setFavTeamId(first.id);
+                  }}
+                  className="w-full bg-slate-950 border border-white/15 rounded-xl px-3 py-2 text-xs font-bold text-white"
+                >
+                  {LEAGUES.map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto pr-1">
+                  {favLeagueTeams.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setFavTeamId(t.id)}
+                      className={`min-h-[40px] px-2.5 py-1.5 rounded-lg border flex items-center gap-2 text-xs font-bold cursor-pointer ${
+                        favTeamId === t.id ? 'bg-slate-800 border-amber-400 text-white' : 'bg-slate-950 border-white/10 text-slate-300'
+                      }`}
+                    >
+                      <ClubCrest team={t} className="w-5 h-5 shrink-0" />
+                      <span className="truncate">{t.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           ) : room ? (
             /* ==================== INSIDE MULTIPLAYER ROOM ==================== */
             <div className="space-y-4">
               <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/60 border border-cyan-400/35 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <div className="text-[11px] font-extrabold uppercase tracking-wider text-cyan-300">
-                    Sala Privada / Aberta · Código
+                    Sala Online · Código
                   </div>
                   <div className="font-mono text-2xl font-black text-amber-300 tracking-widest">
                     {room.code}
@@ -710,7 +804,7 @@ export const OnlineView: React.FC<Props> = ({
                               : 'bg-slate-950 border-white/10 text-slate-300'
                           }`}
                         >
-                          <ClubCrest team={t} className="w-4 h-4" />
+                          <ClubCrest team={t} className="w-5 h-5 shrink-0" />
                           <span className="truncate">{t.name}</span>
                         </button>
                       ))}
@@ -795,6 +889,26 @@ export const OnlineView: React.FC<Props> = ({
                   />
                 </div>
 
+                {/* Nickname quick update */}
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    maxLength={18}
+                    value={nickname}
+                    onChange={(e) => setNickname(e.target.value)}
+                    placeholder="Seu apelido..."
+                    className="flex-1 bg-slate-950 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white"
+                  />
+                  <button
+                    type="button"
+                    disabled={profileSaving}
+                    onClick={handleUpdateNickname}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 text-[11px] font-bold text-amber-300 cursor-pointer"
+                  >
+                    {profileSaving ? '...' : 'Salvar'}
+                  </button>
+                </div>
+
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-xs font-extrabold uppercase text-emerald-300">Seu Clube para Jogar</div>
@@ -830,7 +944,7 @@ export const OnlineView: React.FC<Props> = ({
                           selectedTeamId === t.id ? 'bg-slate-800 border-amber-400 text-white' : 'bg-slate-950 border-white/10 text-slate-300'
                         }`}
                       >
-                        <ClubCrest team={t} className="w-4 h-4" />
+                        <ClubCrest team={t} className="w-5 h-5 shrink-0" />
                         <span className="truncate">{t.name}</span>
                       </button>
                     ))}
@@ -978,8 +1092,8 @@ export const OnlineView: React.FC<Props> = ({
             <p className="text-xs text-slate-400 text-center py-6">Nenhuma partida online finalizada ainda.</p>
           ) : (
             history.map((m) => {
-              const ht = TEAMS.find((t) => t.id === m.home_team_id) || TEAMS[0];
-              const at = TEAMS.find((t) => t.id === m.away_team_id) || TEAMS[1];
+              const ht = TEAMS.find((t) => t.id === m.homeTeamId) || TEAMS[0];
+              const at = TEAMS.find((t) => t.id === m.awayTeamId) || TEAMS[1];
               return (
                 <div
                   key={m.id}
@@ -987,15 +1101,15 @@ export const OnlineView: React.FC<Props> = ({
                 >
                   <div className="flex items-center gap-2 font-bold text-white">
                     <ClubCrest team={ht} className="w-5 h-5" />
-                    <span>{m.home_nickname}</span>
+                    <span>{m.homeNickname}</span>
                     <span className="px-2 py-0.5 rounded bg-slate-800 font-mono text-amber-300">
-                      {m.home_score} - {m.away_score}
+                      {m.homeScore} - {m.awayScore}
                     </span>
-                    <span>{m.away_nickname}</span>
+                    <span>{m.awayNickname}</span>
                     <ClubCrest team={at} className="w-5 h-5" />
                   </div>
                   <div className="text-[11px] text-slate-400 font-mono">
-                    Sala {m.room_code} · Chutes {m.home_shots}x{m.away_shots}
+                    Sala {m.roomCode} · Chutes {m.homeShots}x{m.awayShots}
                   </div>
                 </div>
               );

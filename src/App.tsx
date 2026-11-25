@@ -411,7 +411,7 @@ export default function App() {
                         Multiplayer Online &amp; Ranking
                       </div>
                       <p className="text-xs text-slate-200 mt-0.5">
-                        Salas 1v1 em tempo real, chat no vestiário, contas persistentes no banco de dados SQLite e ranking ELO.
+                        Salas 1v1 em tempo real, chat no vestiário, contas na nuvem e ranking ELO em qualquer dispositivo.
                       </p>
                     </div>
                   </div>

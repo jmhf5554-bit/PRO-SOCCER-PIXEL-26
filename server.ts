@@ -1,216 +1,25 @@
-import crypto from 'crypto';
+import 'dotenv/config';
 import express, { NextFunction, Request, Response } from 'express';
-import fs from 'fs';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
 import { WebSocket, WebSocketServer } from 'ws';
+import {
+  getLeaderboard,
+  getMatchHistory,
+  getOrCreatePlayerByUid,
+  getPlayerByUid,
+  PublicPlayer,
+  recordOnlineMatch,
+  updatePlayerProfile
+} from './src/db/onlineRepo.ts';
+import { adminAuth } from './src/lib/firebase-admin.ts';
+import { AuthRequest, requireAuth } from './src/middleware/auth.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT) || 3000;
 
-// Ensure SQLite data directory exists
-const dataDir = path.resolve(__dirname, 'data');
-fs.mkdirSync(dataDir, { recursive: true });
-const dbPath = path.join(dataDir, 'brfc_online.db');
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS players (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nickname TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    password_salt TEXT NOT NULL,
-    favorite_team_id TEXT NOT NULL DEFAULT 'flamengo',
-    elo INTEGER NOT NULL DEFAULT 1000,
-    wins INTEGER NOT NULL DEFAULT 0,
-    draws INTEGER NOT NULL DEFAULT 0,
-    losses INTEGER NOT NULL DEFAULT 0,
-    goals_for INTEGER NOT NULL DEFAULT 0,
-    goals_against INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    player_id INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS online_matches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    room_code TEXT NOT NULL,
-    home_player_id INTEGER NOT NULL,
-    away_player_id INTEGER NOT NULL,
-    home_nickname TEXT NOT NULL,
-    away_nickname TEXT NOT NULL,
-    home_team_id TEXT NOT NULL,
-    away_team_id TEXT NOT NULL,
-    home_score INTEGER NOT NULL,
-    away_score INTEGER NOT NULL,
-    home_shots INTEGER NOT NULL DEFAULT 0,
-    away_shots INTEGER NOT NULL DEFAULT 0,
-    home_poss INTEGER NOT NULL DEFAULT 50,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-`);
-
-interface PlayerRow {
-  id: number;
-  nickname: string;
-  password_hash: string;
-  password_salt: string;
-  favorite_team_id: string;
-  elo: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  goals_for: number;
-  goals_against: number;
-}
-
-interface PublicPlayer {
-  id: number;
-  nickname: string;
-  favoriteTeamId: string;
-  elo: number;
-  wins: number;
-  draws: number;
-  losses: number;
-  goalsFor: number;
-  goalsAgainst: number;
-}
-
-function toPublicPlayer(row: PlayerRow): PublicPlayer {
-  return {
-    id: row.id,
-    nickname: row.nickname,
-    favoriteTeamId: row.favorite_team_id,
-    elo: row.elo,
-    wins: row.wins,
-    draws: row.draws,
-    losses: row.losses,
-    goalsFor: row.goals_for,
-    goalsAgainst: row.goals_against
-  };
-}
-
-function hashPassword(password: string, salt: string): string {
-  return crypto.scryptSync(password, salt, 64).toString('hex');
-}
-
-function verifyPassword(password: string, salt: string, storedHash: string): boolean {
-  const candidate = Buffer.from(hashPassword(password, salt), 'hex');
-  const expected = Buffer.from(storedHash, 'hex');
-  if (candidate.length !== expected.length) return false;
-  return crypto.timingSafeEqual(candidate, expected);
-}
-
-function createSessionToken(playerId: number): string {
-  const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 7; // 7 days
-  db.prepare('INSERT INTO sessions (token, player_id, expires_at) VALUES (?, ?, ?)').run(token, playerId, expiresAt);
-  return token;
-}
-
-function getPlayerByToken(token: string | undefined): PublicPlayer | null {
-  if (!token || typeof token !== 'string') return null;
-  const session = db
-    .prepare('SELECT player_id, expires_at FROM sessions WHERE token = ?')
-    .get(token) as { player_id: number; expires_at: number } | undefined;
-  if (!session || session.expires_at < Date.now()) {
-    if (session) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
-    return null;
-  }
-  const player = db.prepare('SELECT * FROM players WHERE id = ?').get(session.player_id) as PlayerRow | undefined;
-  return player ? toPublicPlayer(player) : null;
-}
-
-function extractBearer(req: Request): string | undefined {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return undefined;
-  return auth.slice(7).trim();
-}
-
-const stmtFindByNick = db.prepare('SELECT * FROM players WHERE nickname = ?');
-const stmtInsertPlayer = db.prepare(
-  'INSERT INTO players (nickname, password_hash, password_salt, favorite_team_id) VALUES (?, ?, ?, ?)'
-);
-const stmtUpdateFavTeam = db.prepare('UPDATE players SET favorite_team_id = ? WHERE id = ?');
-const stmtLeaderboard = db.prepare(
-  'SELECT id, nickname, favorite_team_id, elo, wins, draws, losses, goals_for, goals_against FROM players ORDER BY elo DESC, wins DESC, (goals_for - goals_against) DESC LIMIT 25'
-);
-const stmtHistory = db.prepare(
-  'SELECT id, room_code, home_nickname, away_nickname, home_team_id, away_team_id, home_score, away_score, home_shots, away_shots, home_poss, created_at FROM online_matches ORDER BY id DESC LIMIT 25'
-);
-const stmtInsertMatch = db.prepare(
-  'INSERT INTO online_matches (room_code, home_player_id, away_player_id, home_nickname, away_nickname, home_team_id, away_team_id, home_score, away_score, home_shots, away_shots, home_poss) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-);
-const stmtUpdatePlayerStats = db.prepare(
-  'UPDATE players SET elo = ?, wins = wins + ?, draws = draws + ?, losses = losses + ?, goals_for = goals_for + ?, goals_against = goals_against + ? WHERE id = ?'
-);
-
-const recordMatchTx = db.transaction(
-  (params: {
-    roomCode: string;
-    homePlayerId: number;
-    awayPlayerId: number;
-    homeTeamId: string;
-    awayTeamId: string;
-    homeScore: number;
-    awayScore: number;
-    homeShots: number;
-    awayShots: number;
-    homePoss: number;
-  }) => {
-    const homeRow = db.prepare('SELECT * FROM players WHERE id = ?').get(params.homePlayerId) as PlayerRow | undefined;
-    const awayRow = db.prepare('SELECT * FROM players WHERE id = ?').get(params.awayPlayerId) as PlayerRow | undefined;
-    if (!homeRow || !awayRow) return null;
-
-    const expectedHome = 1 / (1 + Math.pow(10, (awayRow.elo - homeRow.elo) / 400));
-    const actualHome = params.homeScore > params.awayScore ? 1 : params.homeScore === params.awayScore ? 0.5 : 0;
-    const k = 28;
-    const delta = Math.round(k * (actualHome - expectedHome));
-
-    const newHomeElo = Math.max(400, homeRow.elo + delta);
-    const newAwayElo = Math.max(400, awayRow.elo - delta);
-
-    const hWin = params.homeScore > params.awayScore ? 1 : 0;
-    const draw = params.homeScore === params.awayScore ? 1 : 0;
-    const aWin = params.awayScore > params.homeScore ? 1 : 0;
-
-    stmtUpdatePlayerStats.run(newHomeElo, hWin, draw, aWin, params.homeScore, params.awayScore, homeRow.id);
-    stmtUpdatePlayerStats.run(newAwayElo, aWin, draw, hWin, params.awayScore, params.homeScore, awayRow.id);
-
-    stmtInsertMatch.run(
-      params.roomCode,
-      homeRow.id,
-      awayRow.id,
-      homeRow.nickname,
-      awayRow.nickname,
-      params.homeTeamId,
-      params.awayTeamId,
-      params.homeScore,
-      params.awayScore,
-      params.homeShots,
-      params.awayShots,
-      params.homePoss
-    );
-
-    return {
-      homeDelta: newHomeElo - homeRow.elo,
-      awayDelta: newAwayElo - awayRow.elo,
-      homeElo: newHomeElo,
-      awayElo: newAwayElo
-    };
-  }
-);
-
-// ==================== EXPRESS APP ====================
 const app = express();
 app.use(express.json({ limit: '256kb' }));
 
@@ -273,80 +82,82 @@ function getOpenRoomsList() {
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
-  const playerCount = (db.prepare('SELECT COUNT(*) as c FROM players').get() as { c: number }).c;
-  const matchCount = (db.prepare('SELECT COUNT(*) as c FROM online_matches').get() as { c: number }).c;
-  res.json({ ok: true, players: playerCount, matches: matchCount, openRooms: getOpenRoomsList().length });
+  res.json({ ok: true, openRooms: getOpenRoomsList().length });
 });
 
-app.post('/api/online/auth', (req: Request, res: Response) => {
-  const rawNick = typeof req.body?.nickname === 'string' ? req.body.nickname.trim() : '';
-  const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  const favoriteTeamId = typeof req.body?.favoriteTeamId === 'string' ? req.body.favoriteTeamId.slice(0, 40) : 'flamengo';
+app.post('/api/online/session', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user!.uid;
+    const email = req.user!.email || '';
+    const googleName = typeof req.user!.name === 'string' ? req.user!.name : '';
+    const rawNick = typeof req.body?.nickname === 'string' ? req.body.nickname.trim() : googleName;
+    const favoriteTeamId =
+      typeof req.body?.favoriteTeamId === 'string' ? req.body.favoriteTeamId.trim().slice(0, 40) : 'flamengo';
 
-  if (rawNick.length < 2 || rawNick.length > 18 || !/^[a-zA-Z0-9À-ÿ _.-]+$/.test(rawNick)) {
-    res.status(400).json({ error: 'Apelido deve ter entre 2 e 18 caracteres válidos.' });
-    return;
+    const player = await getOrCreatePlayerByUid(uid, email, rawNick, favoriteTeamId);
+    res.json({ player });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Erro ao iniciar sessão online.' });
   }
-  if (password.length < 4 || password.length > 64) {
-    res.status(400).json({ error: 'A senha/PIN deve ter pelo menos 4 caracteres.' });
-    return;
-  }
+});
 
-  const existing = stmtFindByNick.get(rawNick) as PlayerRow | undefined;
-  if (existing) {
-    if (!verifyPassword(password, existing.password_salt, existing.password_hash)) {
-      res.status(401).json({ error: 'Apelido já cadastrado com outra senha. Verifique seu PIN.' });
+app.get('/api/online/me', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const player = await getPlayerByUid(req.user!.uid);
+    if (!player) {
+      const created = await getOrCreatePlayerByUid(req.user!.uid, req.user!.email || '');
+      res.json({ player: created });
       return;
     }
-    if (favoriteTeamId && favoriteTeamId !== existing.favorite_team_id) {
-      stmtUpdateFavTeam.run(favoriteTeamId, existing.id);
-      existing.favorite_team_id = favoriteTeamId;
+    res.json({ player });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Erro ao buscar perfil.' });
+  }
+});
+
+app.post('/api/online/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const rawNick = typeof req.body?.nickname === 'string' ? req.body.nickname.trim() : undefined;
+    const rawTeam = typeof req.body?.favoriteTeamId === 'string' ? req.body.favoriteTeamId.trim() : undefined;
+
+    if (rawNick !== undefined && (rawNick.length < 2 || rawNick.length > 18 || !/^[a-zA-Z0-9À-ÿ _.-]+$/.test(rawNick))) {
+      res.status(400).json({ error: 'Apelido deve ter entre 2 e 18 caracteres válidos.' });
+      return;
     }
-    const token = createSessionToken(existing.id);
-    res.json({ token, player: toPublicPlayer(existing), isNew: false });
-    return;
-  }
 
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = hashPassword(password, salt);
-  const info = stmtInsertPlayer.run(rawNick, hash, salt, favoriteTeamId);
-  const created = db.prepare('SELECT * FROM players WHERE id = ?').get(info.lastInsertRowid) as PlayerRow;
-  const token = createSessionToken(created.id);
-  res.status(201).json({ token, player: toPublicPlayer(created), isNew: true });
+    const updated = await updatePlayerProfile(req.user!.uid, {
+      nickname: rawNick,
+      favoriteTeamId: rawTeam
+    });
+
+    for (const [ws, pl] of clientPlayer.entries()) {
+      if (pl.uid === updated.uid) {
+        clientPlayer.set(ws, updated);
+      }
+    }
+
+    res.json({ player: updated });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Erro ao atualizar perfil.' });
+  }
 });
 
-app.get('/api/online/me', (req: Request, res: Response) => {
-  const player = getPlayerByToken(extractBearer(req));
-  if (!player) {
-    res.status(401).json({ error: 'Sessão expirada ou inválida.' });
-    return;
+app.get('/api/online/leaderboard', async (_req: Request, res: Response) => {
+  try {
+    const leaderboard = await getLeaderboard();
+    res.json({ leaderboard });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Erro ao carregar ranking.' });
   }
-  res.json({ player });
 });
 
-app.post('/api/online/favorite-team', (req: Request, res: Response) => {
-  const player = getPlayerByToken(extractBearer(req));
-  if (!player) {
-    res.status(401).json({ error: 'Faça login para atualizar o clube.' });
-    return;
+app.get('/api/online/history', async (_req: Request, res: Response) => {
+  try {
+    const history = await getMatchHistory();
+    res.json({ history });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Erro ao carregar histórico.' });
   }
-  const teamId = typeof req.body?.teamId === 'string' ? req.body.teamId.trim().slice(0, 40) : '';
-  if (!teamId) {
-    res.status(400).json({ error: 'Clube inválido.' });
-    return;
-  }
-  stmtUpdateFavTeam.run(teamId, player.id);
-  res.json({ ok: true, favoriteTeamId: teamId });
-});
-
-app.get('/api/online/leaderboard', (_req: Request, res: Response) => {
-  const rows = stmtLeaderboard.all() as PlayerRow[];
-  res.json({ leaderboard: rows.map(toPublicPlayer) });
-});
-
-app.get('/api/online/history', (_req: Request, res: Response) => {
-  const rows = stmtHistory.all();
-  res.json({ history: rows });
 });
 
 app.get('/api/online/rooms', (_req: Request, res: Response) => {
@@ -366,6 +177,15 @@ function sendJson(ws: WebSocket, msg: Record<string, unknown>) {
 function broadcastRoom(room: OnlineRoom, msg: Record<string, unknown>) {
   sendJson(room.host.ws, msg);
   if (room.guest) sendJson(room.guest.ws, msg);
+}
+
+function broadcastOpenRoomsToLobby() {
+  const list = getOpenRoomsList();
+  for (const [ws] of clientPlayer.entries()) {
+    if (!clientRoom.has(ws)) {
+      sendJson(ws, { type: 'rooms_list', rooms: list });
+    }
+  }
 }
 
 function generateRoomCode(): string {
@@ -391,15 +211,17 @@ function removeFromRoom(ws: WebSocket) {
       clientRoom.delete(room.guest.ws);
     }
     rooms.delete(code);
+    broadcastOpenRoomsToLobby();
   } else if (room.guest && room.guest.ws === ws) {
     room.guest = null;
     room.status = 'waiting';
     sendJson(room.host.ws, { type: 'room_updated', room: serializeRoom(room), notice: 'O visitante saiu da sala.' });
+    broadcastOpenRoomsToLobby();
   }
 }
 
 wss.on('connection', (ws: WebSocket) => {
-  ws.on('message', (raw) => {
+  ws.on('message', async (raw) => {
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(raw.toString()) as Record<string, unknown>;
@@ -415,13 +237,20 @@ wss.on('connection', (ws: WebSocket) => {
 
     if (type === 'auth') {
       const token = typeof msg.token === 'string' ? msg.token : '';
-      const player = getPlayerByToken(token);
-      if (!player) {
-        sendJson(ws, { type: 'error', error: 'Sessão inválida. Entre novamente.' });
+      if (!token) {
+        sendJson(ws, { type: 'error', error: 'Autenticação necessária.' });
         return;
       }
-      clientPlayer.set(ws, player);
-      sendJson(ws, { type: 'authed', player, rooms: getOpenRoomsList() });
+      try {
+        const decoded = await adminAuth.verifyIdToken(token);
+        const player =
+          (await getPlayerByUid(decoded.uid)) ||
+          (await getOrCreatePlayerByUid(decoded.uid, decoded.email || '', typeof decoded.name === 'string' ? decoded.name : undefined));
+        clientPlayer.set(ws, player);
+        sendJson(ws, { type: 'authed', player, rooms: getOpenRoomsList() });
+      } catch {
+        sendJson(ws, { type: 'error', error: 'Sessão expirada. Faça login novamente.' });
+      }
       return;
     }
 
@@ -432,12 +261,15 @@ wss.on('connection', (ws: WebSocket) => {
 
     const player = clientPlayer.get(ws);
     if (!player) {
-      sendJson(ws, { type: 'error', error: 'Autenticação necessária para usar salas online.' });
+      sendJson(ws, { type: 'error', error: 'Faça login para criar ou entrar em salas online.' });
       return;
     }
 
     if (type === 'create_room') {
       removeFromRoom(ws);
+      const latestPlayer = (await getPlayerByUid(player.uid).catch(() => null)) || player;
+      clientPlayer.set(ws, latestPlayer);
+
       const code = generateRoomCode();
       const teamId = typeof msg.teamId === 'string' ? msg.teamId.slice(0, 40) : 'flamengo';
       const weather = msg.weather === 'sunny' || msg.weather === 'rain' ? msg.weather : 'night';
@@ -455,7 +287,7 @@ wss.on('connection', (ws: WebSocket) => {
         difficulty,
         host: {
           ws,
-          player,
+          player: latestPlayer,
           teamId,
           useAway: Boolean(msg.useAway),
           ready: true
@@ -467,6 +299,7 @@ wss.on('connection', (ws: WebSocket) => {
       rooms.set(code, room);
       clientRoom.set(ws, code);
       sendJson(ws, { type: 'room_joined', role: 'host', room: serializeRoom(room) });
+      broadcastOpenRoomsToLobby();
       return;
     }
 
@@ -486,9 +319,12 @@ wss.on('connection', (ws: WebSocket) => {
         return;
       }
       removeFromRoom(ws);
+      const latestPlayer = (await getPlayerByUid(player.uid).catch(() => null)) || player;
+      clientPlayer.set(ws, latestPlayer);
+
       room.guest = {
         ws,
-        player,
+        player: latestPlayer,
         teamId: typeof msg.teamId === 'string' ? msg.teamId.slice(0, 40) : 'palmeiras',
         useAway: Boolean(msg.useAway),
         ready: false
@@ -498,8 +334,9 @@ wss.on('connection', (ws: WebSocket) => {
       sendJson(room.host.ws, {
         type: 'room_updated',
         room: serializeRoom(room),
-        notice: `${player.nickname} entrou na sala!`
+        notice: `${latestPlayer.nickname} entrou na sala!`
       });
+      broadcastOpenRoomsToLobby();
       return;
     }
 
@@ -547,6 +384,7 @@ wss.on('connection', (ws: WebSocket) => {
       room.status = 'playing';
       room.matchRecorded = false;
       broadcastRoom(room, { type: 'match_started', room: serializeRoom(room) });
+      broadcastOpenRoomsToLobby();
       return;
     }
 
@@ -576,31 +414,41 @@ wss.on('connection', (ws: WebSocket) => {
       const awayShots = Math.max(0, Math.min(200, Math.round(Number(msg.awayShots) || 0)));
       const homePoss = Math.max(0, Math.min(100, Math.round(Number(msg.homePossPct) || 50)));
 
-      const summary = recordMatchTx({
-        roomCode: room.code,
-        homePlayerId: room.host.player.id,
-        awayPlayerId: room.guest.player.id,
-        homeTeamId: room.host.teamId,
-        awayTeamId: room.guest.teamId,
-        homeScore,
-        awayScore,
-        homeShots,
-        awayShots,
-        homePoss
-      });
+      try {
+        const summary = await recordOnlineMatch({
+          roomCode: room.code,
+          homePlayerId: room.host.player.id,
+          awayPlayerId: room.guest.player.id,
+          homeTeamId: room.host.teamId,
+          awayTeamId: room.guest.teamId,
+          homeScore,
+          awayScore,
+          homeShots,
+          awayShots,
+          homePoss
+        });
 
-      if (summary) {
-        room.host.player.elo = summary.homeElo;
-        room.guest.player.elo = summary.awayElo;
+        if (summary) {
+          room.host.player.elo = summary.homeElo;
+          room.guest.player.elo = summary.awayElo;
+        }
+
+        broadcastRoom(room, {
+          type: 'match_recorded',
+          homeScore,
+          awayScore,
+          summary,
+          room: serializeRoom(room)
+        });
+      } catch (err) {
+        console.error('Error recording online match:', err);
+        broadcastRoom(room, {
+          type: 'room_updated',
+          room: serializeRoom(room),
+          notice: `Partida encerrada (${homeScore} x ${awayScore}).`
+        });
       }
-
-      broadcastRoom(room, {
-        type: 'match_recorded',
-        homeScore,
-        awayScore,
-        summary,
-        room: serializeRoom(room)
-      });
+      broadcastOpenRoomsToLobby();
     }
   });
 
